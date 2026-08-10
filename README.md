@@ -1,4 +1,7 @@
-![Chochola • The sweetest way to build the web](https://chocolaframework.web.app/static/img/banner.jpg)
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/banner_dark.jpg">
+    <img src="assets/banner.jpg" alt="Chocola • The sweetest way to build the web" />
+</picture>
 
 ## What is Chocola
 

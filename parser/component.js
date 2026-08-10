@@ -44,7 +44,146 @@ export function extractRuntime(script, compName) {
     }
   }
 
-  throw new Error(`${compName} $runtime function has unclosed curly braces.`);
+  throw new Error(`${compName} $runtime function has unclosed curly braces`);
+}
+
+export function extractTopLevelVariables(script) {
+  if (!script) return [];
+  const vars = [];
+  let i = 0;
+  let depth = 0;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let inStr = false;
+  let strChar = null;
+
+  while (i < script.length) {
+    const ch = script[i];
+
+    if (inStr) {
+      if (ch === "\\") i++;
+      else if (ch === strChar) inStr = false;
+      i++;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inStr = true;
+      strChar = ch;
+      i++;
+      continue;
+    }
+
+    if (ch === "/" && script[i + 1] === "/") {
+      while (i < script.length && script[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "/" && script[i + 1] === "*") {
+      i += 2;
+      while (i < script.length && !(script[i] === "*" && script[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+
+    if (ch === "{") { depth++; i++; continue; }
+    if (ch === "}") { depth--; i++; continue; }
+    if (ch === "(") { parenDepth++; i++; continue; }
+    if (ch === ")") { parenDepth--; i++; continue; }
+    if (ch === "[") { bracketDepth++; i++; continue; }
+    if (ch === "]") { bracketDepth--; i++; continue; }
+
+    if (depth === 0 && parenDepth === 0 && bracketDepth === 0) {
+      const rest = script.slice(i);
+      const m = rest.match(/^(let|const)\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*/);
+      if (m) {
+        const keyword = m[1];
+        const before = script.slice(0, i).trimEnd();
+        if (!before.endsWith("export")) {
+          let name = m[2];
+          let p = i + m[0].length;
+          while (p < script.length && /\s/.test(script[p])) p++;
+          i = p;
+
+          while (p < script.length) {
+            i = p;
+            let q = p;
+
+            if (script[q] === "=") {
+              q++;
+              while (q < script.length && /\s/.test(script[q])) q++;
+              const delim = findDeclaratorEnd(script, q);
+              if (name !== "self" && name !== "ctx") {
+                vars.push({ keyword, name, value: script.slice(q, delim).trim() });
+              }
+              if (script[delim] === ";") { i = delim + 1; break; }
+              p = delim + 1;
+              while (p < script.length && /\s/.test(script[p])) p++;
+            } else {
+              if (name !== "self" && name !== "ctx") {
+                vars.push({ keyword, name, value: undefined });
+              }
+              if (script[q] === ";") { i = q + 1; break; }
+              if (script[q] !== ",") { i = q; break; }
+              p = q + 1;
+              while (p < script.length && /\s/.test(script[p])) p++;
+            }
+
+            const nameMatch = script.slice(p).match(/^([a-zA-Z_$][0-9a-zA-Z_$]*)\s*/);
+            if (!nameMatch) { i = p; break; }
+            name = nameMatch[1];
+            p += nameMatch[0].length;
+          }
+          continue;
+        }
+      }
+    }
+    i++;
+  }
+
+  return vars;
+}
+
+function findDeclaratorEnd(script, start) {
+  let i = start;
+  let parens = 0;
+  let brackets = 0;
+  let braces = 0;
+  let inStr = false;
+  let strChar = null;
+
+  while (i < script.length) {
+    const c = script[i];
+
+    if (inStr) {
+      if (c === "\\") i++;
+      else if (c === strChar) inStr = false;
+      i++;
+      continue;
+    }
+
+    if (c === "/" && script[i + 1] === "/") {
+      while (i < script.length && script[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && script[i + 1] === "*") {
+      i += 2;
+      while (i < script.length && !(script[i] === "*" && script[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+
+    if (c === '"' || c === "'" || c === "`") { inStr = true; strChar = c; i++; continue; }
+    if (c === "(") { parens++; i++; continue; }
+    if (c === ")") { parens--; i++; continue; }
+    if (c === "[") { brackets++; i++; continue; }
+    if (c === "]") { brackets--; i++; continue; }
+    if (c === "{") { braces++; i++; continue; }
+    if (c === "}") { braces--; i++; continue; }
+    if ((c === ";" || c === ",") && parens === 0 && brackets === 0 && braces === 0) return i;
+    i++;
+  }
+
+  return i;
 }
 
 export function extractTopLevelFunctions(script, excludeName) {

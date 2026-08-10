@@ -1,8 +1,8 @@
 import path from "path";
-import { getChocolaConfig } from "../utils.js";
+import { getConfig } from "../utils.js";
 
 export async function loadConfig(rootDir) {
-  const config = await getChocolaConfig(rootDir);
+  const config = await getConfig(rootDir);
   const bundleConfig = config.bundle || {};
 
   const srcDir = bundleConfig.srcDir || "src";

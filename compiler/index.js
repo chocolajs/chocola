@@ -1,5 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { performance } from "perf_hooks";
 import chalk from "./chalk.js";
 import { loadConfig, resolvePaths } from "./config.js";
 import {
@@ -16,8 +17,8 @@ import {
 } from "./dom-processor.js";
 import { processAllComponents } from "./component-processor.js";
 import { generateRuntimeScript } from "./runtime-generator.js";
-import { genRandomId, throwError } from "./utils.js";
-import { compileExpression, hasDelIfAttr, getDelIfAttr, removeDelIfAttr } from "../parser/index.js";
+import { genRandomId, throwError, warnConstantCondition, findElementLine } from "./utils.js";
+import { compileExpr, evaluateConstant, hasMountIf, getMountIf, removeMountIf } from "../parser/index.js";
 import {
   copyStaticDir,
   getComponents,
@@ -56,12 +57,17 @@ function logBanner() {
   );
 }
 
-function logSuccess(outDirPath) {
+function logSuccess(outDirPath, durationMs) {
   console.log(
     chalk.bold.green(">"),
     "Project bundled succesfully at",
     chalk.green.underline(outDirPath));
-    console.log(chalk.bold.green(`\nJOB DONE!\n`));
+    console.log(chalk.bold.green(`\nJOB DONE!`) + chalk.hex(TEXT_FAINT)(` (${formatDuration(durationMs)})\n`));
+}
+
+function formatDuration(ms) {
+  if (ms >= 1000) return (ms / 1000).toFixed(2) + "s";
+  return Math.round(ms) + "ms";
 }
 
 async function setupOutputDirectory(outDirPath, emptyOutDir) {
@@ -107,26 +113,49 @@ async function processAssets(doc, rootDir, srcDir, outDirPath) {
   return cssContents
 }
 
-function processPageConditionals(parent) {
+function processPageConditionals(parent, sourceFile, sourceContent) {
   const children = [...parent.children];
   let chainActive = false;
   let chainRendered = false;
 
+  const getLocation = (child) => {
+    if (!sourceContent) return sourceFile;
+    const lineNum = findElementLine(sourceContent, child.outerHTML);
+    return lineNum !== null ? `${sourceFile}:${lineNum}` : sourceFile;
+  };
+
+  const warnIfConstant = (expr, child, attr) => {
+    const { constant, value } = evaluateConstant(expr);
+    if (!constant) return;
+    warnConstantCondition(getLocation(child), child.tagName.toLowerCase(), attr, Boolean(value));
+  };
+
   for (const child of children) {
     const hasIf = child.hasAttribute("if");
-    const hasDelIf = hasDelIfAttr(child);
+    const hasDelIf = hasMountIf(child);
     const hasElif = child.hasAttribute("elif");
     const hasElse = child.hasAttribute("else");
 
+    if (hasIf || hasDelIf || hasElif) {
+      const stripBraces = (raw) => raw.startsWith("{") ? raw.slice(1, -1) : raw;
+      if (hasIf) warnIfConstant(stripBraces(child.getAttribute("if")), child, "if");
+      if (hasDelIf) warnIfConstant(stripBraces(getMountIf(child)), child, "mount:if");
+      if (hasElif) warnIfConstant(stripBraces(child.getAttribute("elif")), child, "elif");
+    }
+
     if (hasElif || hasElse) {
-      if (!chainActive) continue;
+      if (!chainActive) {
+        const tag = child.tagName.toLowerCase();
+        const attr = hasElif ? "elif" : "else";
+        throwError(`${getLocation(child)}\n    <${tag}> has ${attr} without a preceding if/mount:if sibling`);
+      }
       if (chainRendered) { child.remove(); continue; }
     }
 
     if (hasIf) {
       const raw = child.getAttribute("if");
       const expr = raw.startsWith("{") ? raw.slice(1, -1) : raw;
-      const fn = compileExpression(expr, false);
+      const fn = compileExpr(expr, false);
       const result = fn();
       chainActive = true;
       if (result) {
@@ -137,9 +166,9 @@ function processPageConditionals(parent) {
       }
       child.removeAttribute("if");
     } else if (hasDelIf) {
-      const raw = getDelIfAttr(child);
+      const raw = getMountIf(child);
       const expr = raw.startsWith("{") ? raw.slice(1, -1) : raw;
-      const fn = compileExpression(expr, false);
+      const fn = compileExpr(expr, false);
       const result = fn();
       chainActive = true;
       if (result) {
@@ -148,11 +177,11 @@ function processPageConditionals(parent) {
         child.remove();
         chainRendered = false;
       }
-      removeDelIfAttr(child);
+      removeMountIf(child);
     } else if (hasElif) {
       const raw = child.getAttribute("elif");
       const expr = raw.startsWith("{") ? raw.slice(1, -1) : raw;
-      const fn = compileExpression(expr, false);
+      const fn = compileExpr(expr, false);
       const result = fn();
       if (result) {
         chainRendered = true;
@@ -170,13 +199,14 @@ function processPageConditionals(parent) {
     }
 
     if (child.parentNode) {
-      processPageConditionals(child);
+      processPageConditionals(child, sourceFile, sourceContent);
     }
   }
 }
 
 export default async function compile(rootDir, buildConfig) {
   const isHotReload = buildConfig?.isHotReload || null;
+  const startTime = performance.now();
   !isHotReload && logBanner();
 
   const config = await loadConfig(rootDir);
@@ -195,7 +225,7 @@ export default async function compile(rootDir, buildConfig) {
   const doc = dom.document;
   const appContainer = validateAppContainer(doc);
 
-  processPageConditionals(appContainer);
+  processPageConditionals(appContainer, pageSourcePath, dom.protectedContent);
 
   const appElements = getAppElements(appContainer);
   const { runtimeScript, scopesCss, hashMap, csrClasses } = processAllComponents(appElements, loadedComponents, pageSourcePath, srcIndexContent);
@@ -225,8 +255,10 @@ export default async function compile(rootDir, buildConfig) {
   await fs.mkdir(chocolaDir, { recursive: true });
   await fs.writeFile(path.join(chocolaDir, "hashes.json"), JSON.stringify(hashMap, null, 2) + "\n");
 
-  !isHotReload && logSuccess(paths.outDir);
-  isHotReload && console.log("Dev server updated");
+  const durationMs = performance.now() - startTime;
+
+  !isHotReload && logSuccess(paths.outDir, durationMs);
+  isHotReload && console.log("Dev server updated " + chalk.hex(TEXT_FAINT)(`(${formatDuration(durationMs)})`));
 }
 
 /**

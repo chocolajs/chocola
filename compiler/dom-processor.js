@@ -2,12 +2,14 @@ import { parseHTML } from "linkedom";
 import { promises as fs } from "fs";
 import path from "path";
 import { protectCurlyBraces, restoreCurlyBraces } from "../utils.js";
-import { extractContextFromElement } from "../parser/context.js";
 import { throwError } from "./utils.js";
 import { readMyFile } from "./fs.js";
 
 export function createDOM(srcIndexContent) {
-  return parseHTML(protectCurlyBraces(srcIndexContent));
+  const protectedContent = protectCurlyBraces(srcIndexContent);
+  const dom = parseHTML(protectedContent);
+  dom.protectedContent = protectedContent;
+  return dom;
 }
 
 export function validateAppContainer(doc) {

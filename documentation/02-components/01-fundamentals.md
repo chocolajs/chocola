@@ -74,7 +74,7 @@ Use `:root` as a placeholder for the component's root element:
 
 ## `<script>` — Props and Runtime
 
-The `<script>` section has three roles:
+The `<script>` section has four roles:
 
 ### 1. Prop declarations with `export let`
 
@@ -90,7 +90,29 @@ Declare component props with optional default values:
 
 Props without a default value (like `title` above) default to `undefined` unless provided by the parent.
 
-### 2. Root element placeholder
+### 2. Top-level variables
+
+Any `let` or `const` declared at the top level of `<script>` becomes part of the component's context. Their values are available in template bindings and inside `$runtime`:
+
+```html
+<script>
+    let log = "Hi";
+    const maxItems = 10;
+    const double = (n) => n * 2;
+
+    function $runtime() {
+        console.log(log); // "Hi"
+    }
+</script>
+
+<template>
+    <div>{log} {maxItems} {double(5)}</div>
+</template>
+```
+
+Top-level variables are scoped to the component and won't leak. Use them for internal state that templates and `$runtime` can share. A parent-passed attribute with the same name takes precedence.
+
+### 3. Root element placeholder
 
 ```js
 let self;
@@ -98,7 +120,7 @@ let self;
 
 At compile-time, `self` is replaced with the component's actual root DOM element.
 
-### 3. Runtime function
+### 4. Runtime function
 
 ```js
 function $runtime() {

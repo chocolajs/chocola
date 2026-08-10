@@ -38,7 +38,7 @@ export function scopeCss(cssString, cssId) {
     }
   }
 
-  function findMatchingBrace(s, openIndex) {
+  function findClosure(s, openIndex) {
     let depth = 0;
     for (let i = openIndex; i < s.length; i++) {
       const ch = s[i];
@@ -65,7 +65,7 @@ export function scopeCss(cssString, cssId) {
         break;
       }
       const header = str.substring(i, braceIndex);
-      const endBrace = findMatchingBrace(str, braceIndex);
+      const endBrace = findClosure(str, braceIndex);
       const inner = str.substring(braceIndex + 1, endBrace);
 
       if (header.trim().startsWith("@")) {

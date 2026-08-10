@@ -1,5 +1,5 @@
-export { extractPropsDefaults, extractRuntime, extractTopLevelFunctions } from "./component.js";
-export { extractContextFromElement, hasDelIfAttr, getDelIfAttr, removeDelIfAttr } from "./context.js";
+export { extractPropsDefaults, extractRuntime, extractTopLevelFunctions, extractTopLevelVariables } from "./component.js";
+export { extractCtxFromEl, hasMountIf, getMountIf, removeMountIf } from "./context.js";
 export { reservedAttrs, getLineNumber, validateChainStructure, applyConditionalToElement, interpolateNode } from "./template.js";
 export { scopeCss } from "./css.js";
-export { compileExpression } from "./utils.js";
+export { compileExpr, evaluateConstant } from "./utils.js";
