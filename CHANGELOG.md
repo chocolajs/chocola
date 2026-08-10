@@ -1,5 +1,13 @@
 # Chocola Changelog
 
+## 2.0.0-next.9 (Aug 10, 2026)
+- Added compile-time warnings for conditional blocks that are always truthy or falsy [[#31](https://github.com/chocolajs/chocola/issues/31)]
+- Added error logging for `if` blocks in `index.html` [[#38](https://github.com/chocolajs/chocola/issues/38)]
+- Added support for declaring variables at the top level of `<script>` [[#62](https://github.com/chocolajs/chocola/issues/62)]
+- Added compile-time warning logs for unused variables and bindings [[#66](https://github.com/chocolajs/chocola/issues/66)]
+- Reduced existing code size [[#80](https://github.com/chocolajs/chocola/issues/80)]
+- Added ompiling time logging (build and dev server) [[#82](https://github.com/chocolajs/chocola/issues/82)]
+
 ## 2.0.0-next.8 (Jul 31, 2026)
 - **`node_modules` size dropped from 18.50 MB to 3.50 MB!:** replaced `jsdom` dependency with `linkedom`, wich has a smaller dependency tree, and is theoretically faster [[#74](https://github.com/chocolajs/chocola/issues/75)]
 - `del:if` was changed to `mount:if` to make it more semantically intuitive [[#68](https://github.com/chocolajs/chocola/issues/68)]
