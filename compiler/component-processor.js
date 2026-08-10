@@ -1,12 +1,12 @@
 import path from "path";
 import { parseHTML } from "linkedom";
 import { protectCurlyBraces } from "../utils.js";
-import { genRandomId, incrementAlfabet, throwError, deterministicHash } from "./utils.js";
+import { genRandomId, incrementAlfabet, throwError, deterministicHash, warnConstantCondition, warnUnusedDeclaration, findElementLine } from "./utils.js";
 import {
-  extractPropsDefaults, extractRuntime, extractTopLevelFunctions,
-  extractContextFromElement, hasDelIfAttr, getDelIfAttr, removeDelIfAttr,
+  extractPropsDefaults, extractRuntime, extractTopLevelFunctions, extractTopLevelVariables,
+  extractCtxFromEl, hasMountIf, getMountIf,
   reservedAttrs, validateChainStructure, applyConditionalToElement, interpolateNode,
-  scopeCss, compileExpression,
+  scopeCss, compileExpr, evaluateConstant,
 } from "../parser/index.js";
 import chalk from "./chalk.js";
 
@@ -24,6 +24,7 @@ class ProcessContext {
     this.scopedStyles = scopedStyles;
     this.staticCtxRegistry = staticCtxRegistry;
     this.csrClasses = csrClasses;
+    this.unusedWarned = new Set();
   }
 }
 
@@ -59,6 +60,7 @@ function generateCSRClass(compName, cx, explicitClassName) {
 
   const compProps = extractPropsDefaults(script);
   const topFuncSrc = extractTopLevelFunctions(script || "", RUNTIME_KW);
+  const topVars = extractTopLevelVariables(script || "");
   let runtime = extractRuntime(script || "", compName);
 
   if (!cx.cssScopesMap.has(compName)) {
@@ -93,13 +95,23 @@ function generateCSRClass(compName, cx, explicitClassName) {
   }
 
   let csrRuntimeSource = null;
+  const injectedNames = new Set(compProps.map(p => p.name));
+  for (const varName of bindVarNames) injectedNames.add(varName);
+  const topVarsToInject = topVars.filter(v => !injectedNames.has(v.name));
   if (runtime) {
     let injectCode = "";
     for (const { name, defaultValue } of compProps) {
       if (defaultValue !== undefined) {
-        injectCode += `let ${name} = ctx.${name}??${defaultValue};\n`;
+        injectCode += `let ${name} = ctx.${name}??(${defaultValue});\n`;
       } else {
         injectCode += `let ${name} = ctx.${name};\n`;
+      }
+    }
+    for (const { keyword, name, value } of topVarsToInject) {
+      if (value !== undefined) {
+        injectCode += `${keyword} ${name} = ctx.${name}??(${value});\n`;
+      } else {
+        injectCode += `${keyword} ${name};\n`;
       }
     }
     for (const varName of bindVarNames) {
@@ -116,20 +128,110 @@ function generateCSRClass(compName, cx, explicitClassName) {
   }
 
   const className = explicitClassName || compName.replace(".html", "").replace(/^\w/, c => c.toUpperCase());
-  const propsObj = {};
+  const propsParts = [];
   for (const { name, defaultValue } of compProps) {
-    propsObj[name] = defaultValue !== undefined ? defaultValue : null;
+    propsParts.push(`${JSON.stringify(name)}: ${defaultValue !== undefined ? defaultValue : "null"}`);
+  }
+  for (const { name, value } of topVarsToInject) {
+    if (value !== undefined) {
+      propsParts.push(`${JSON.stringify(name)}: ${value}`);
+    }
   }
 
   const childrenPart = childMappings.length > 0
     ? ",\n      children: [" + childMappings.map(m => `{tag:"${m.tag}",compClass:${m.compClass}}`).join(",") + "]"
     : "";
   const runtimePart = csrRuntimeSource ? `,\n      runtime: ${csrRuntimeSource}` : "";
-  const classDef = `class ${className} extends ChocolaComponent {\n  constructor() {\n    super({\n      template: \`${escapeForTemplateLiteral(template)}\`,\n      hash: "${cssId}",\n      props: ${JSON.stringify(propsObj)}${runtimePart}${childrenPart}\n    });\n  }\n}`;
+  const propsPart = propsParts.length > 0 ? `{ ${propsParts.join(", ")} }` : "{}";
+  const classDef = `class ${className} extends ChocolaComponent {\n  constructor() {\n    super({\n      template: \`${escapeForTemplateLiteral(template)}\`,\n      hash: "${cssId}",\n      props: ${propsPart}${runtimePart}${childrenPart}\n    });\n  }\n}`;
   cx.csrClasses.set(compName, classDef);
 }
 
+const BARE_IDENTIFIER_RE = /(?<![.\w$])[a-zA-Z_$][0-9a-zA-Z_$]*/g;
+const PROPERTY_IDENTIFIER_RE = /\.([a-zA-Z_$][0-9a-zA-Z_$]*)/g;
 
+function countIdentifiers(text, counts) {
+  for (const re of [BARE_IDENTIFIER_RE, PROPERTY_IDENTIFIER_RE]) {
+    re.lastIndex = 0;
+    for (const m of text.matchAll(re)) counts.set(m[1] ?? m[0], (counts.get(m[1] ?? m[0]) || 0) + 1);
+  }
+  return counts;
+}
+
+function escapeNameForRegex(name) {
+  return name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function findLineInSource(source, regex) {
+  const match = regex.exec(source);
+  if (!match) return null;
+  return source.substring(0, match.index).split("\n").length;
+}
+
+function warnUnusedDeclarations(cx, compName, instance, script, fragment) {
+  if (!script && !fragment.querySelector("[bind\\:]")) return;
+  if (cx.unusedWarned.has(compName)) return;
+  cx.unusedWarned.add(compName);
+
+  const props = extractPropsDefaults(script).map(p => p.name);
+  const topVars = extractTopLevelVariables(script).map(v => v.name);
+  const topFuncs = extractTopLevelFunctions(script, RUNTIME_KW)
+    .map(src => src.match(/^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/)?.[1])
+    .filter(Boolean);
+
+  const bindings = [];
+  for (const el of fragment.querySelectorAll("*")) {
+    for (const attr of el.attributes) {
+      if (attr.name.startsWith("bind:")) bindings.push({ name: attr.value, element: el });
+    }
+  }
+
+  const counts = new Map();
+  if (script) countIdentifiers(script, counts);
+
+  const walk = (node) => {
+    if (node.nodeType === 3) {
+      for (const m of node.textContent.matchAll(/\{([^}]+)\}/g)) countIdentifiers(m[1], counts);
+      return;
+    }
+    if (node.attributes) {
+      for (const attr of node.attributes) {
+        if (attr.name.startsWith("bind:")) {
+          countIdentifiers(attr.value, counts);
+        } else {
+          for (const m of attr.value.matchAll(/\{([^}]+)\}/g)) countIdentifiers(m[1], counts);
+        }
+      }
+    }
+    for (const child of node.childNodes) walk(child);
+  };
+  walk(fragment);
+
+  const isUnused = (name) => (counts.get(name) || 0) <= 1;
+  const warn = (kind, name, declRegex) => {
+    const lineNum = findLineInSource(instance, declRegex);
+    warnUnusedDeclaration(lineNum !== null ? `${compName}:${lineNum}` : compName, kind, name);
+  };
+
+  for (const name of props) {
+    if (isUnused(name)) warn("prop", name, new RegExp("export\\s+let\\s+" + escapeNameForRegex(name) + "\\b"));
+  }
+  for (const name of topVars) {
+    if (isUnused(name)) warn("variable", name, new RegExp("(?:^|[^\\w])(?:let|const)\\s+" + escapeNameForRegex(name) + "\\b"));
+  }
+  for (const name of topFuncs) {
+    if (isUnused(name)) warn("function", name, new RegExp("(?:async\\s+)?function\\s+" + escapeNameForRegex(name) + "\\b"));
+  }
+  const seenBindings = new Set();
+  for (const { name, element } of bindings) {
+    if (seenBindings.has(name)) continue;
+    seenBindings.add(name);
+    if (isUnused(name)) {
+      const lineNum = findElementLine(instance, element.outerHTML);
+      warnUnusedDeclaration(lineNum !== null ? `${compName}:${lineNum}` : compName, "binding", name);
+    }
+  }
+}
 
 export function processComponentElement(
   element,
@@ -174,7 +276,7 @@ export function processComponentElement(
   if (cx.staticCtxRegistry && cx.staticCtxRegistry.has(element)) {
     ctx = cx.staticCtxRegistry.get(element);
   } else {
-    ctx = extractContextFromElement(element);
+    ctx = extractCtxFromEl(element);
     cx.staticCtxRegistry && cx.staticCtxRegistry.set(element, ctx);
   }
 
@@ -182,7 +284,7 @@ export function processComponentElement(
     compProps.forEach(({ name, defaultValue }) => {
       if (defaultValue !== undefined && !(name in ctx)) {
         try {
-          ctx[name] = compileExpression(defaultValue, false)();
+          ctx[name] = compileExpr(defaultValue, false)();
         } catch {
           ctx[name] = defaultValue;
         }
@@ -191,6 +293,15 @@ export function processComponentElement(
   }
 
   const topFuncSrc = extractTopLevelFunctions(script || "", RUNTIME_KW);
+  const topVars = extractTopLevelVariables(script || "");
+  for (const { name, value } of topVars) {
+    if (name in ctx) continue;
+    if (value !== undefined) {
+      try {
+        ctx[name] = compileExpr(value, false)();
+      } catch {}
+    }
+  }
   for (const src of topFuncSrc) {
     try {
       const fn = (0, eval)("(" + src + ")");
@@ -207,6 +318,8 @@ export function processComponentElement(
   });
 
   const fragment = parseFragment(template, doc);
+
+  warnUnusedDeclarations(cx, compName, instance, script, fragment);
 
   const slotFragment = parseFragment(elInnerHtml, doc);
   if (sourceFile) {
@@ -226,6 +339,21 @@ export function processComponentElement(
   const elBindIds = new Map();
   let bindCounter = 0;
 
+  const conditionalLocations = new Map();
+  for (const { el } of childEntries) {
+    if (!el.hasAttribute("if") && !hasMountIf(el) && !el.hasAttribute("elif")) continue;
+    let location = sourceFile;
+    if (instance) {
+      const lineNum = findElementLine(instance, el.outerHTML);
+      if (lineNum !== null) location = `${compName}:${lineNum}`;
+    }
+    if (location === sourceFile && sourceContent) {
+      const lineNum = findElementLine(sourceContent, el.outerHTML);
+      if (lineNum !== null) location = `${sourceFile}:${lineNum}`;
+    }
+    conditionalLocations.set(el, location);
+  }
+
   childEntries.forEach(({ el: child, parent }) => {
     if (!condChains.has(parent)) {
       condChains.set(parent, { active: false, rendered: false });
@@ -233,13 +361,26 @@ export function processComponentElement(
     const condChain = condChains.get(parent);
 
     const hasIf = child.hasAttribute("if");
-    const hasDelIf = hasDelIfAttr(child);
+    const hasDelIf = hasMountIf(child);
     const hasElif = child.hasAttribute("elif");
     const hasElse = child.hasAttribute("else");
 
+    if (hasIf || hasDelIf || hasElif) {
+      const location = conditionalLocations.get(child) || sourceFile;
+      const stripBraces = (raw) => raw.startsWith("{") ? raw.slice(1, -1) : raw;
+      const tag = child.tagName.toLowerCase();
+      const warnIfConstant = (expr, attr) => {
+        const { constant, value } = evaluateConstant(expr);
+        if (constant) warnConstantCondition(location, tag, attr, Boolean(value));
+      };
+      if (hasIf) warnIfConstant(stripBraces(child.getAttribute("if")), "if");
+      if (hasDelIf) warnIfConstant(stripBraces(getMountIf(child)), "mount:if");
+      if (hasElif) warnIfConstant(stripBraces(child.getAttribute("elif")), "elif");
+    }
+
     if (hasElif || hasElse) {
       if (!condChain.active) {
-        throwError(`${instance.__sourceFile || compName}: <${child.tagName.toLowerCase()}> has ${hasElif ? "elif" : "else"} without a preceding if/del-if sibling`);
+        throwError(`${instance.__sourceFile || compName}: <${child.tagName.toLowerCase()}> has ${hasElif ? "elif" : "else"} without a preceding if/mount:if sibling`);
       }
       if (condChain.rendered) {
         child.remove();
@@ -254,7 +395,7 @@ export function processComponentElement(
       if (hasElif || hasElse) {
         if (hasElif) {
           const expr = child.getAttribute("elif").slice(1, -1);
-          const fn = compileExpression(expr, true);
+          const fn = compileExpr(expr, true);
           if (!fn(ctxProxy)) {
             child.remove();
             return;
@@ -266,9 +407,9 @@ export function processComponentElement(
           condChain.active = false;
         }
       } else if (hasIf || hasDelIf) {
-        const raw = hasIf ? child.getAttribute("if") : getDelIfAttr(child);
+        const raw = hasIf ? child.getAttribute("if") : getMountIf(child);
         const expr = raw.slice(1, -1);
-        const fn = compileExpression(expr, true);
+        const fn = compileExpr(expr, true);
         condChain.active = true;
         if (fn(ctxProxy)) {
           child.replaceWith(...child.children);
@@ -309,7 +450,7 @@ export function processComponentElement(
           /\{([^}]+)\}/g,
           (_, expr) => {
             try {
-              return compileExpression(expr, true)(ctxProxy);
+              return compileExpr(expr, true)(ctxProxy);
             } catch {
               return "";
             }
@@ -320,7 +461,7 @@ export function processComponentElement(
 
     const condAttrs = {};
     if (hasIf) condAttrs["if"] = child.getAttribute("if");
-    if (hasDelIf) condAttrs["mount:if"] = getDelIfAttr(child);
+    if (hasDelIf) condAttrs["mount:if"] = getMountIf(child);
     if (hasElif) condAttrs["elif"] = child.getAttribute("elif");
     if (hasElse) condAttrs["else"] = "";
 
@@ -373,7 +514,7 @@ export function processComponentElement(
       for (const { name, defaultValue } of compProps) {
         if (declared.has(name)) continue;
         if (defaultValue !== undefined) {
-          ctxDefParts.push(`let ${name} = ctx.${name}??${defaultValue};\n`);
+          ctxDefParts.push(`let ${name} = ctx.${name}??(${defaultValue});\n`);
         } else {
           ctxDefParts.push(`let ${name} = ctx.${name};\n`);
         }
@@ -393,6 +534,14 @@ export function processComponentElement(
           const topFuncs = topFuncSrc;
 
           let injectCode = ctxDef;
+          for (const b of bindings) declared.add(b.varName);
+          const undeclaredTopVars = topVars.filter(v => !declared.has(v.name));
+          if (undeclaredTopVars.length > 0) {
+            injectCode += "\n" + undeclaredTopVars.map(v => v.value !== undefined
+              ? `${v.keyword} ${v.name} = ctx.${v.name}??(${v.value});`
+              : `${v.keyword} ${v.name};`
+            ).join("\n") + "\n";
+          }
           if (bindings.length > 0) {
             injectCode += "\n" + bindings.map(b => {
               const accessor = b.prop === "self" ? "" : "." + b.prop;

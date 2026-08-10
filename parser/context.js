@@ -1,7 +1,7 @@
-import { compileExpression } from "./utils.js";
+import { compileExpr } from "./utils.js";
 import { restoreTemplateChars } from "../utils.js";
 
-export function extractContextFromElement(element) {
+export function extractCtxFromEl(element) {
   const ctx = {};
   for (const attr of element.attributes) {
     const key = attr.name;
@@ -10,7 +10,7 @@ export function extractContextFromElement(element) {
     const matches = [...val.matchAll(/\{([^}]+)\}/g)];
     if (matches.length === 1 && matches[0][0] === val) {
       try {
-        ctx[key] = compileExpression(matches[0][1], false)();
+        ctx[key] = compileExpr(matches[0][1], false)();
         continue;
       } catch {}
     }
@@ -19,12 +19,12 @@ export function extractContextFromElement(element) {
   return ctx;
 }
 
-export function hasDelIfAttr(el) {
+export function hasMountIf(el) {
   return el.hasAttribute("mount:if");
 }
-export function getDelIfAttr(el) {
+export function getMountIf(el) {
   return el.getAttribute("mount:if");
 }
-export function removeDelIfAttr(el) {
+export function removeMountIf(el) {
   el.removeAttribute("mount:if");
 }

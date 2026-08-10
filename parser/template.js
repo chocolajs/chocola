@@ -1,16 +1,16 @@
-import { compileExpression } from "./utils.js";
-import { hasDelIfAttr, getDelIfAttr, removeDelIfAttr } from "./context.js";
+import { compileExpr } from "./utils.js";
+import { hasMountIf, getMountIf, removeMountIf } from "./context.js";
 
 export const reservedAttrs = ["if", "mount:if", "elif", "else"];
 
-export function getLineNumber(sourceContent, parentContent, idxInParent) {
-  if (sourceContent === parentContent) {
+export function getLineNumber(srcContent, parentContent, idxInParent) {
+  if (srcContent === parentContent) {
     return parentContent.substring(0, idxInParent).split("\n").length;
   }
-  const templateStartMatch = sourceContent.match(/<template[^>]*>/);
+  const templateStartMatch = srcContent.match(/<template[^>]*>/);
   if (templateStartMatch) {
     const contentStart = templateStartMatch.index + templateStartMatch[0].length;
-    const beforeContent = sourceContent.substring(0, contentStart);
+    const beforeContent = srcContent.substring(0, contentStart);
     const linesInBefore = beforeContent.split("\n").length;
     const linesInTemplate = parentContent.substring(0, idxInParent).split("\n").length;
     return linesInBefore + linesInTemplate - 1;
@@ -24,7 +24,7 @@ export function validateChainStructure(parent, sourceFile, sourceContent, parent
 
   for (const child of children) {
     const hasIf = child.hasAttribute("if");
-    const hasDelIf = hasDelIfAttr(child);
+    const hasDelIf = hasMountIf(child);
     const hasElif = child.hasAttribute("elif");
     const hasElse = child.hasAttribute("else");
 
@@ -40,7 +40,7 @@ export function validateChainStructure(parent, sourceFile, sourceContent, parent
             if (lineNum !== null) loc = `${sourceFile}:${lineNum}`;
           }
         }
-        throw new Error(`${loc}\n    <${tag}> has ${attr} without a preceding if/del-if sibling`);
+        throw new Error(`${loc}\n    <${tag}> has ${attr} without a preceding if/mount:if sibling`);
       }
       if (hasElse) {
         chainActive = false;
@@ -60,7 +60,7 @@ export function validateChainStructure(parent, sourceFile, sourceContent, parent
 export function applyConditionalToElement(child, ctxProxy, condChain, hasIf, hasDelIf, hasElif, hasElse) {
   if (hasIf) {
     const expr = child.getAttribute("if").slice(1, -1);
-    const fn = compileExpression(expr, true);
+    const fn = compileExpr(expr, true);
     condChain.active = true;
     if (fn(ctxProxy)) {
       condChain.rendered = true;
@@ -70,8 +70,8 @@ export function applyConditionalToElement(child, ctxProxy, condChain, hasIf, has
     }
     child.removeAttribute("if");
   } else if (hasDelIf) {
-    const expr = getDelIfAttr(child).slice(1, -1);
-    const fn = compileExpression(expr, true);
+    const expr = getMountIf(child).slice(1, -1);
+    const fn = compileExpr(expr, true);
     condChain.active = true;
     if (fn(ctxProxy)) {
       condChain.rendered = true;
@@ -79,10 +79,10 @@ export function applyConditionalToElement(child, ctxProxy, condChain, hasIf, has
       child.remove();
       condChain.rendered = false;
     }
-    removeDelIfAttr(child);
+    removeMountIf(child);
   } else if (hasElif) {
     const expr = child.getAttribute("elif").slice(1, -1);
-    const fn = compileExpression(expr, true);
+    const fn = compileExpr(expr, true);
     if (fn(ctxProxy)) {
       condChain.rendered = true;
     } else {
@@ -106,7 +106,7 @@ export function interpolateNode(root, ctxProxy) {
     if (node.nodeType === 3) {
       node.textContent = node.textContent.replace(/\{([^}]+)\}/g, (_, expr) => {
         try {
-          return compileExpression(expr, true)(ctxProxy);
+          return compileExpr(expr, true)(ctxProxy);
         } catch {
           return "";
         }

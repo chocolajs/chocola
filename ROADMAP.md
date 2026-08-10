@@ -32,15 +32,16 @@ Introducing the `$` prefix.
 
 ### Available now
 - New SFC (Single-File Components) system with tags: `<head>`, `<script>`, `<template>`, `<style>`
+- Imperative components API
 - New `$runtime` function replacing `RUNTIME`.
 - Scripts bundling
 - Scoped functions
 - `bind:` attribute for manipulating DOM elements.
 - Deterministic CSS scope hashes with a reference map written to `.chocola/hashes.json`.
-- Changed `del:if` directive to `mount:if`.
+- Changed `del:if` directive to `mount:if`
+- Fully scoped components `script`
 
 ### Breaking changes
-- Runtime component instancing
 - CSR SPA router
 - Declarative components imports
 

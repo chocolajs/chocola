@@ -3,7 +3,7 @@ const RBRACE_PH = "_%%CHOCOLA-RBRACE%%_";
 
 const exprCache = new Map();
 
-function compileExpression(expr, useCtx) {
+function compileExp(expr, useCtx) {
   expr = expr.replace(/_%%CHOCOLA-(?:AMP|LT|GT)\d+%%_/g, char =>
     char.includes("AMP") ? "&" : char.includes("LT") ? "<" : ">"
   );
@@ -28,7 +28,7 @@ function interpolateNode(root, ctx) {
         .replace(new RegExp(RBRACE_PH, "g"), "}");
       node.textContent = text.replace(/\{([^}]+)\}/g, (_, expr) => {
         try {
-          return String(compileExpression(expr, true)(ctx));
+          return String(compileExp(expr, true)(ctx));
         } catch {
           return "";
         }
@@ -41,21 +41,21 @@ function interpolateNode(root, ctx) {
   }
 }
 
-function applyConditionalToElement(child, ctx, chain, hasIf, hasDelIf, hasElif, hasElse) {
+function applyDirectiveToEl(child, ctx, chain, hasIf, hasMountIf, hasElif, hasElse) {
   if (hasIf) {
     const expr = child.getAttribute("if").slice(1, -1);
     chain.active = true;
-    if (compileExpression(expr, true)(ctx)) {
+    if (compileExp(expr, true)(ctx)) {
       chain.rendered = true;
     } else {
       child.style.display = "none";
       chain.rendered = false;
     }
     child.removeAttribute("if");
-  } else if (hasDelIf) {
+  } else if (hasMountIf) {
     const expr = child.getAttribute("mount:if").slice(1, -1);
     chain.active = true;
-    if (compileExpression(expr, true)(ctx)) {
+    if (compileExp(expr, true)(ctx)) {
       chain.rendered = true;
     } else {
       child.remove();
@@ -64,7 +64,7 @@ function applyConditionalToElement(child, ctx, chain, hasIf, hasDelIf, hasElif, 
     child.removeAttribute("mount:if");
   } else if (hasElif) {
     const expr = child.getAttribute("elif").slice(1, -1);
-    if (compileExpression(expr, true)(ctx)) {
+    if (compileExp(expr, true)(ctx)) {
       chain.rendered = true;
     } else {
       child.remove();
@@ -90,7 +90,7 @@ function interpolateAttributes(element, ctx) {
         .replace(new RegExp(RBRACE_PH, "g"), "}");
       attr.value = raw.replace(/\{([^}]+)\}/g, (_, expr) => {
         try {
-          return String(compileExpression(expr, true)(ctx));
+          return String(compileExp(expr, true)(ctx));
         } catch {
           return "";
         }
@@ -99,10 +99,10 @@ function interpolateAttributes(element, ctx) {
   }
 }
 
-function processConditionals(element, ctx, chain) {
+function processDirectives(element, ctx, chain) {
   for (const child of [...element.children]) {
     const hasIf = child.hasAttribute("if");
-    const hasDelIf = child.hasAttribute("mount:if");
+    const hasMountIf = child.hasAttribute("mount:if");
     const hasElif = child.hasAttribute("elif");
     const hasElse = child.hasAttribute("else");
 
@@ -112,46 +112,46 @@ function processConditionals(element, ctx, chain) {
       continue;
     }
 
-    applyConditionalToElement(child, ctx, chain, hasIf, hasDelIf, hasElif, hasElse);
+    applyDirectiveToEl(child, ctx, chain, hasIf, hasMountIf, hasElif, hasElse);
 
     if (child.parentNode) {
-      processConditionals(child, ctx, chain);
+      processDirectives(child, ctx, chain);
     }
   }
 }
 
-function processSlots(element, projectedChildren) {
-  const slots = element.querySelectorAll("slot");
+function processSlots(el, projected) {
+  const slots = el.querySelectorAll("slot");
   for (const slot of slots) {
-    const clone = projectedChildren.map(c => c.cloneNode(true));
+    const clone = projected.map(c => c.cloneNode(true));
     slot.replaceWith(...clone);
   }
 }
 
 let bindCounter = 0;
 
-function processBindAttributes(element) {
+function processBindings(el) {
   const bindings = [];
-  for (const attr of [...element.attributes]) {
+  for (const attr of [...el.attributes]) {
     if (attr.name.startsWith("bind:")) {
       const prop = attr.name.slice(5);
       const varName = attr.value;
       const bindId = "b" + (bindCounter++);
-      element.setAttribute("data-chbind-" + bindId, "");
+      el.setAttribute("data-chbind-" + bindId, "");
       bindings.push({ prop, varName, bindId });
-      element.removeAttribute(attr.name);
+      el.removeAttribute(attr.name);
     }
   }
   return bindings;
 }
 
-function resolveDataBindings(element) {
+function resolveBindings(el) {
   const ids = [];
-  for (const attr of [...element.attributes]) {
+  for (const attr of [...el.attributes]) {
     const match = attr.name.match(/^data-chbind-(b\d+)$/);
     if (match) {
       ids.push(match[1]);
-      element.removeAttribute(attr.name);
+      el.removeAttribute(attr.name);
     }
   }
   return ids;
@@ -162,8 +162,8 @@ function collectBindings(root) {
   const idToEl = {};
 
   for (const el of [root, ...root.querySelectorAll("*")]) {
-    bindingDefs.push(...processBindAttributes(el));
-    for (const id of resolveDataBindings(el)) {
+    bindingDefs.push(...processBindings(el));
+    for (const id of resolveBindings(el)) {
       idToEl[id] = el;
     }
   }
@@ -225,7 +225,7 @@ class ChocolaComponent {
     }
 
     processSlots(root, this.#children || []);
-    processConditionals(root, mergedCtx, { active: false, rendered: false });
+    processDirectives(root, mergedCtx, { active: false, rendered: false });
     interpolateAttributes(root, mergedCtx);
     interpolateNode(root, mergedCtx);
     root.classList.add(this.#hash);

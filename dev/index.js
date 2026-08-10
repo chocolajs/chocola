@@ -4,7 +4,7 @@ import path from "path";
 import chalk from "../compiler/chalk.js";
 import compile from "../compiler/index.js";
 import { loadConfig, resolvePaths } from "../compiler/config.js";
-import { getChocolaConfig } from "../utils.js";
+import { getConfig } from "../utils.js";
 
 export async function serve(__rootdir) {
   await compile(__rootdir);
@@ -17,7 +17,7 @@ export async function serve(__rootdir) {
 
   let lastBuildTime = Date.now();
 
-  const fullConfig = await getChocolaConfig(__rootdir);
+  const fullConfig = await getConfig(__rootdir);
   const config = await loadConfig(__rootdir);
   const paths = resolvePaths(__rootdir, config);
   const devConfig = fullConfig.dev;
