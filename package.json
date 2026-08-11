@@ -28,7 +28,7 @@
     "url": "https://github.com/sponsors/chocolajs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test \"test/**/*.test.js\""
   },
   "exports": {
     "./compiler": "./compiler/index.js",
