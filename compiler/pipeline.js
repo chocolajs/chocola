@@ -56,15 +56,15 @@ export async function getSrcIndex(srcPath) {
   }
 }
 
-export async function processStylesheet(link, rootDir, srcDir, outDirPath, fileIds) {
+export async function processStylesheet(link, rootDir, srcDir, out) {
   try {
     const href = link.href;
     if (href.startsWith("http://") || href.startsWith("https://")) return;
     const stylesheetPath = path.join(rootDir, srcDir, href);
     const css = await fs.readFile(stylesheetPath, { encoding: "utf8" });
-    const cssFileName = "css-" + genRandomId(fileIds, 6) + ".css";
+    const cssFileName = "css-" + genRandomId(out.ids, 6) + ".css";
 
-    await fs.writeFile(path.join(outDirPath, cssFileName), css);
+    out.files.push({ path: cssFileName, content: css });
     link.setAttribute("href", "./" + cssFileName);
 
     return css;
@@ -73,25 +73,25 @@ export async function processStylesheet(link, rootDir, srcDir, outDirPath, fileI
   }
 }
 
-export async function processIcons(link, rootDir, srcDir, outDirPath) {
+export async function processIcons(link, rootDir, srcDir, out) {
   try {
     const href = link.href;
     if (href.startsWith("http://") || href.startsWith("https://")) return;
     const iconPath = path.join(rootDir, srcDir, href);
-    await fs.copyFile(iconPath, path.join(outDirPath, href));
+    out.copies.push({ from: iconPath, to: path.join(out.outDir, href) });
   } catch (err) {
     throwError(`Failed to copy icon: ${err}`);
   }
 }
 
-export async function processScript(doc, script, rootDir, srcDir, outDirPath, fileIds) {
+export async function processScript(doc, script, rootDir, srcDir, out) {
   try {
     const src = script.getAttribute("src");
     if (src.startsWith("http://") || src.startsWith("https://")) return;
     const scriptPath = path.join(rootDir, srcDir, src);
     const content = await fs.readFile(scriptPath, { encoding: "utf8" });
-    const jsFileName = "js-" + genRandomId(fileIds, 6) + ".js";
-    await fs.writeFile(path.join(outDirPath, jsFileName), content);
+    const jsFileName = "js-" + genRandomId(out.ids, 6) + ".js";
+    out.files.push({ path: jsFileName, content });
 
     const newScript = doc.createElement("script");
     for (const attr of script.attributes) {
@@ -110,12 +110,12 @@ export async function processScript(doc, script, rootDir, srcDir, outDirPath, fi
   }
 }
 
-export async function copyStaticDir(srcPath, outDirPath) {
+export async function copyStaticDir(srcPath, out) {
   const staticSrc = path.join(srcPath, "static");
-  const staticDest = path.join(outDirPath, "static");
+  const staticDest = path.join(out.outDir, "static");
   try {
     await fs.access(staticSrc);
-    await fs.cp(staticSrc, staticDest, { recursive: true, force: true });
+    out.copies.push({ from: staticSrc, to: staticDest, recursive: true });
   } catch {
   }
 }

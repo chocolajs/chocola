@@ -100,24 +100,6 @@ export function genRandomId(collection = null, length = 10, lettersOnly = false)
   }
 }
 
-export function incrementAlfabet(letters) {
-  let arr = letters.split("");
-  let i = arr.length - 1;
-
-  while (i >= 0) {
-    let pos = arr[i].charCodeAt(0) - 97;
-    if (pos < 25) {
-      arr[i] = String.fromCharCode(pos + 97 + 1);
-      return arr.join("");
-    } else {
-      arr[i] = "a";
-      i--;
-    }
-  }
-
-  return "a" + arr.join("");
-}
-
 export function deterministicHash(content, length = 8) {
   const hash = createHash("sha256").update(content).digest();
   let result = "";
@@ -125,6 +107,10 @@ export function deterministicHash(content, length = 8) {
     result += String.fromCharCode(97 + (hash[i % hash.length] % 26));
   }
   return result;
+}
+
+export function runtimeFunctionId(compName) {
+  return "r_" + deterministicHash(compName, 8);
 }
 
 const ID_LETTERS = "abcdefghijklmnopqrstuvwxyz";
