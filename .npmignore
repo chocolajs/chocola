@@ -1,4 +1,5 @@
 assets/
+bench/
 node_modules/
 tests/
 CHANGELOG.md
