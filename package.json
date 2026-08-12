@@ -28,7 +28,9 @@
     "url": "https://github.com/sponsors/chocolajs"
   },
   "scripts": {
-    "test": "node --test \"tests/**/*.test.js\""
+    "test": "node --test \"tests/**/*.test.js\"",
+    "bench": "node bench/index.js",
+    "bench:csv": "node bench/index.js --csv"
   },
   "exports": {
     "./compiler": "./compiler/index.js",
