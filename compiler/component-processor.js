@@ -370,7 +370,7 @@ export function processComponentElement(
       const tag = child.tagName.toLowerCase();
       const warnIfConstant = (expr, attr) => {
         const { constant, value } = evaluateConstant(expr);
-        if (constant) warnConstantCondition(location, tag, attr, Boolean(value));
+        if (constant) warnConstantCondition(location, tag, attr, expr, Boolean(value));
       };
       if (hasIf) warnIfConstant(stripBraces(child.getAttribute("if")), "if");
       if (hasDelIf) warnIfConstant(stripBraces(getMountIf(child)), "mount:if");

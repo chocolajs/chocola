@@ -6,18 +6,18 @@ export function throwError(err) {
   throw new Error(err);
 }
 
-export function warnConstantCondition(location, tag, attr, truthy) {
+export function warnConstantCondition(location, tag, attr, expr, truthy) {
   const article = /^[aeiou]/.test(attr) ? "an" : "a";
   console.warn(
-    chalk.bold.yellow("WARNING!"),
-    `${location}: <${tag}> has ${article} \`${attr}\` condition that is always ${truthy ? "truthy" : "falsy"}`
+    chalk.bold.yellow("WARN "),
+    `${chalk.bold.green(location)} ${chalk.dim('—')} ${chalk.blue(`<${tag}>`)} \`${chalk.bold(attr + "={" + expr + "}")}\` is always ${chalk.green(truthy ? "truthy" : "falsy")}`
   );
 }
 
 export function warnUnusedDeclaration(location, kind, name) {
   console.warn(
-    chalk.bold.yellow("WARNING!"),
-    `${location}: ${kind} \`${name}\` is never used`
+    chalk.bold.yellow("WARN "),
+    `${chalk.bold.green(location)} ${chalk.dim('—')} ${kind} \`${chalk.blue(name)}\` is never used`
   );
 }
 
