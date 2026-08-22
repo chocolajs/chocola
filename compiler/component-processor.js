@@ -119,11 +119,7 @@ function generateCSRClass(compName, cx, explicitClassName) {
       }
     }
     if (topFuncSrc.length > 0) {
-      let fnChunk = "";
-      topFuncSrc.forEach(([name, fn]) => {
-        fnChunk += fn + "\n"
-      });
-      injectCode += "\n" + fnChunk;
+      injectCode += "\n" + topFuncSrc.join("\n\n") + "\n";
     }
     runtime = runtime.replace(/\$runtime\([^)]*\)\s*\{/, match => match + "\n" + injectCode);
     runtime = runtime.replace(`${RUNTIME_KW}()`, `function(self, ctx)`);
@@ -178,7 +174,9 @@ function warnUnusedDeclarations(cx, compName, instance, script, fragment) {
 
   const props = extractPropsDefaults(script).map(p => p.name);
   const topVars = extractTopLevelVariables(script).map(v => v.name);
-  const topFuncs = extractTopLevelFunctions(script, RUNTIME_KW);
+  const topFuncs = extractTopLevelFunctions(script, RUNTIME_KW)
+    .map(src => src.match(/^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/)?.[1])
+    .filter(Boolean);
 
   const bindings = [];
   for (const el of fragment.querySelectorAll("*")) {
@@ -220,7 +218,7 @@ function warnUnusedDeclarations(cx, compName, instance, script, fragment) {
   for (const name of topVars) {
     if (isUnused(name)) warn("variable", name, new RegExp("(?:^|[^\\w])(?:let|const)\\s+" + escapeNameForRegex(name) + "\\b"));
   }
-  for (const [name, fn] of topFuncs) {
+  for (const name of topFuncs) {
     if (isUnused(name)) warn("function", name, new RegExp("(?:async\\s+)?function\\s+" + escapeNameForRegex(name) + "\\b"));
   }
   const seenBindings = new Set();
@@ -300,15 +298,15 @@ export function processComponentElement(
     if (value !== undefined) {
       try {
         ctx[name] = compileExpr(value, false)();
-      } catch { }
+      } catch {}
     }
   }
-  for (const [name, fn] of topFuncSrc) {
+  for (const src of topFuncSrc) {
     try {
-      if (name && !(name in ctx)) {
-        ctx[name] = new Function(`return (${fn})`)();
-      }
-    } catch { }
+      const fn = (0, eval)("(" + src + ")");
+      const name = fn.name;
+      if (name && !(name in ctx)) ctx[name] = fn;
+    } catch {}
   }
 
   const elInnerHtml = element.innerHTML;
@@ -550,11 +548,7 @@ export function processComponentElement(
             }).join("\n") + "\n";
           }
           if (topFuncs.length > 0) {
-            let fnChunk = "";
-            topFuncs.forEach(([name, fn]) => {
-              fnChunk += fn + "\n"
-            });
-            injectCode += "\n" + fnChunk;
+            injectCode += "\n" + topFuncs.join("\n\n") + "\n";
           }
           runtime = runtime.replace(/\$runtime\([^)]*\)\s*\{/, match => match + "\n" + injectCode);
 

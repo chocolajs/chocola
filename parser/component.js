@@ -255,7 +255,7 @@ export function extractTopLevelFunctions(script, excludeName) {
         }
 
         if (name !== excludeName) {
-          funcs.push([name, script.slice(i, end)]);
+          funcs.push(script.slice(i, end));
         }
         i = end;
         continue;

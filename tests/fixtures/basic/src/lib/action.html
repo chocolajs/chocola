@@ -1,14 +1,9 @@
 <script>
   export let action = null;
   function $runtime(self, ctx) {
-    logMsg("msg")
     if (self.onclick) {
       self.onclick = null;
     }
-  }
-
-  function logMsg(msg) {
-    console.log(msg)
   }
 </script>
 <template>
