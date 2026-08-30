@@ -237,7 +237,8 @@ export function processComponentElement(
   cx,
   renderChain = [],
   sourceFile,
-  sourceContent
+  sourceContent,
+  globalCtx = {}
 ) {
   const tagName = element.tagName.toLowerCase();
   const compName = tagName + ".html";
@@ -275,7 +276,12 @@ export function processComponentElement(
   if (cx.staticCtxRegistry && cx.staticCtxRegistry.has(element)) {
     ctx = cx.staticCtxRegistry.get(element);
   } else {
-    ctx = extractCtxFromEl(element);
+    ctx = extractCtxFromEl(element, globalCtx);
+    if (globalCtx && typeof globalCtx === "object") {
+      for (const [k, v] of Object.entries(globalCtx)) {
+        if (!(k in ctx)) ctx[k] = v;
+      }
+    }
     cx.staticCtxRegistry && cx.staticCtxRegistry.set(element, ctx);
   }
 
@@ -469,7 +475,8 @@ export function processComponentElement(
       cx,
       renderChain.concat(compName),
       compName,
-      template
+      template,
+      globalCtx
     );
 
     let condTarget = child;
@@ -490,7 +497,8 @@ export function processComponentElement(
 
   if (firstChild && firstChild.nodeType === 1) {
     if (script) {
-      const compId = "chid-" + genRandomId(cx.compIdColl);
+      const compId = "chid-" + deterministicHash(compName + ":" + cx.compIdColl.length, 8);
+      cx.compIdColl.push(compId);
       firstChild.setAttribute("chid", compId);
 
       const ctxRegex = /ctx\s*=\s*({.*?})/;
@@ -590,7 +598,7 @@ export function processComponentElement(
   return firstChild && firstChild.nodeType === 1 ? firstChild : true;
 }
 
-export function processAllComponents(appElements, loadedComponents, pageSourceFile, pageSourceContent) {
+export function processAllComponents(appElements, loadedComponents, pageSourceFile, pageSourceContent, globalCtx = {}) {
   const cx = new ProcessContext(
     loadedComponents, [], [], new Map(), [], new Map(), [], new Map(), new Map()
   );
@@ -612,7 +620,7 @@ export function processAllComponents(appElements, loadedComponents, pageSourceFi
 
   appElements.forEach(el => {
     if (!el.isConnected) return;
-    processComponentElement(el, cx, [], pageSourceFile, pageSourceContent);
+    processComponentElement(el, cx, [], pageSourceFile, pageSourceContent, globalCtx);
   });
   const runtimeScript = cx.runtimeChunks.join("\n");
   const hasComponents = cx.runtimeChunks.length > 0;

@@ -1,5 +1,5 @@
 import { promises as fs } from "fs";
-import { throwError, genRandomId } from "./utils.js";
+import { throwError, deterministicHash } from "./utils.js";
 import { readMyFile, checkFile } from "./fs.js";
 import path from "path";
 
@@ -62,7 +62,13 @@ export async function processStylesheet(link, rootDir, srcDir, out) {
     if (href.startsWith("http://") || href.startsWith("https://")) return;
     const stylesheetPath = path.join(rootDir, srcDir, href);
     const css = await fs.readFile(stylesheetPath, { encoding: "utf8" });
-    const cssFileName = "css-" + genRandomId(out.ids, 6) + ".css";
+    const base = deterministicHash(css + href, 6);
+    let cssFileName = "css-" + base + ".css";
+    let counter = 0;
+    while (out.ids.includes(cssFileName)) {
+      cssFileName = "css-" + deterministicHash(css + href + counter++, 6) + ".css";
+    }
+    out.ids.push(cssFileName);
 
     out.files.push({ path: cssFileName, content: css });
     link.setAttribute("href", "./" + cssFileName);
@@ -90,7 +96,13 @@ export async function processScript(doc, script, rootDir, srcDir, out) {
     if (src.startsWith("http://") || src.startsWith("https://")) return;
     const scriptPath = path.join(rootDir, srcDir, src);
     const content = await fs.readFile(scriptPath, { encoding: "utf8" });
-    const jsFileName = "js-" + genRandomId(out.ids, 6) + ".js";
+    const base = deterministicHash(content + src, 6);
+    let jsFileName = "js-" + base + ".js";
+    let counter = 0;
+    while (out.ids.includes(jsFileName)) {
+      jsFileName = "js-" + deterministicHash(content + src + counter++, 6) + ".js";
+    }
+    out.ids.push(jsFileName);
     out.files.push({ path: jsFileName, content });
 
     const newScript = doc.createElement("script");

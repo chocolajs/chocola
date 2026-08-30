@@ -1,23 +1,22 @@
-import { genRandomId } from "./utils.js";
+import { deterministicHash } from "./utils.js";
 
 export function generateRuntimeScript(runtimeScript, csrSource, csrClasses) {
-  const fileIds = [];
   const files = [];
 
   if (csrSource) {
-    const name = "run-" + genRandomId(fileIds, 6) + ".js";
     const source = csrSource.replace(/^export\s+\{?\s*[^}]+\s*}?\s*;?\s*$/m, "");
+    const name = "run-" + deterministicHash(source, 6) + ".js";
     files.push({ path: name, content: source });
   }
 
   if (csrClasses) {
-    const name = "run-" + genRandomId(fileIds, 6) + ".js";
+    const name = "run-" + deterministicHash(csrClasses, 6) + ".js";
     files.push({ path: name, content: csrClasses });
   }
 
   if (runtimeScript) {
-    const name = "run-" + genRandomId(fileIds, 6) + ".js";
     const content = `document.addEventListener("DOMContentLoaded", () => {${runtimeScript}})`;
+    const name = "run-" + deterministicHash(content, 6) + ".js";
     files.push({ path: name, content });
   }
 

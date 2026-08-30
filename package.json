@@ -34,7 +34,8 @@
   },
   "exports": {
     "./compiler": "./compiler/index.js",
-    "./dev": "./dev/index.js"
+    "./dev": "./dev/index.js",
+    "./server": "./server/index.js"
   },
   "dependencies": {
     "linkedom": "^0.18.13"

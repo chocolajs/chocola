@@ -12,7 +12,7 @@ import {
 } from "./dom-processor.js";
 import { processAllComponents } from "./component-processor.js";
 import { generateRuntimeScript } from "./runtime-generator.js";
-import { genRandomId, throwError, warnConstantCondition, findElementLine } from "./utils.js";
+import { deterministicHash, throwError, warnConstantCondition, findElementLine } from "./utils.js";
 import { compileExpr, evaluateConstant, hasMountIf, getMountIf, removeMountIf } from "../parser/index.js";
 import {
   processStylesheet,
@@ -21,7 +21,11 @@ import {
   copyStaticDir,
 } from "./pipeline.js";
 
-function processPageConditionals(parent, sourceFile, sourceContent) {
+function processPageConditionals(parent, sourceFile, sourceContent, ctx = {}) {
+  const ctxProxy = new Proxy(ctx, {
+    has() { return true; },
+    get(target, key) { return target[key]; },
+  });
   const children = [...parent.children];
   let chainActive = false;
   let chainRendered = false;
@@ -63,8 +67,8 @@ function processPageConditionals(parent, sourceFile, sourceContent) {
     if (hasIf) {
       const raw = child.getAttribute("if");
       const expr = raw.startsWith("{") ? raw.slice(1, -1) : raw;
-      const fn = compileExpr(expr, false);
-      const result = fn();
+      const fn = compileExpr(expr, true);
+      const result = fn(ctxProxy);
       chainActive = true;
       if (result) {
         chainRendered = true;
@@ -76,8 +80,8 @@ function processPageConditionals(parent, sourceFile, sourceContent) {
     } else if (hasDelIf) {
       const raw = getMountIf(child);
       const expr = raw.startsWith("{") ? raw.slice(1, -1) : raw;
-      const fn = compileExpr(expr, false);
-      const result = fn();
+      const fn = compileExpr(expr, true);
+      const result = fn(ctxProxy);
       chainActive = true;
       if (result) {
         chainRendered = true;
@@ -89,8 +93,8 @@ function processPageConditionals(parent, sourceFile, sourceContent) {
     } else if (hasElif) {
       const raw = child.getAttribute("elif");
       const expr = raw.startsWith("{") ? raw.slice(1, -1) : raw;
-      const fn = compileExpr(expr, false);
-      const result = fn();
+      const fn = compileExpr(expr, true);
+      const result = fn(ctxProxy);
       if (result) {
         chainRendered = true;
       } else {
@@ -107,7 +111,7 @@ function processPageConditionals(parent, sourceFile, sourceContent) {
     }
 
     if (child.parentNode) {
-      processPageConditionals(child, sourceFile, sourceContent);
+      processPageConditionals(child, sourceFile, sourceContent, ctx);
     }
   }
 }
@@ -142,14 +146,15 @@ export async function renderPage(graph, ctx = {}) {
   const doc = dom.document;
   const appContainer = validateAppContainer(doc);
 
-  processPageConditionals(appContainer, page.sourcePath, dom.protectedContent);
+  processPageConditionals(appContainer, page.sourcePath, dom.protectedContent, ctx);
 
   const appElements = getAppElements(appContainer);
   const { runtimeScript, scopesCss, hashMap, csrClasses } = processAllComponents(
     appElements,
     graph.loadedComponents,
     page.sourcePath,
-    page.source
+    page.source,
+    ctx
   );
 
   const csrSource = await fs.readFile(new URL("../runtime/index.js", import.meta.url), "utf-8");
@@ -158,7 +163,7 @@ export async function renderPage(graph, ctx = {}) {
   await processAssets(doc, graph, out);
 
   if (scopesCss) {
-    const fileName = "sc-" + genRandomId(null, 6) + ".css";
+    const fileName = "sc-" + deterministicHash(scopesCss, 6) + ".css";
     out.files.push({ path: fileName, content: scopesCss });
     appendStylesheetLink(doc, fileName);
   }

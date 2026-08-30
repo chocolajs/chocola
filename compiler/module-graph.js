@@ -193,7 +193,10 @@ export async function buildModuleGraph(rootDir) {
       mtimeMs: await getFileMtime(path.join(paths.components, filename)),
     });
     graph.addModule(module);
-    compileComponentModule(module, graph);
+  }
+
+  for (const module of graph.modules.values()) {
+    if (module.kind === "component") compileComponentModule(module, graph);
   }
 
   const pageDom = createDOM(pageModule.source);
