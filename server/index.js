@@ -86,8 +86,7 @@ async function loadMiddleware(rootDir, middlewarePath) {
   try {
     await fs.access(resolved);
   } catch {
-    console.warn(`[chocola/server] middleware file not found: ${resolved}`);
-    return [];
+    throw new Error(`[chocola/server] middleware file not found: ${resolved}`);
   }
   const imported = await import(pathToFileURL(resolved).href);
   const raw = imported.default ?? imported;

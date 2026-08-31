@@ -13,11 +13,16 @@ export function extractCtxFromEl(element, globalCtx = null) {
     const matches = [...val.matchAll(/\{([^}]+)\}/g)];
     if (matches.length === 1 && matches[0][0] === val) {
       try {
+        let evaluated;
         if (proxy) {
-          ctx[key] = compileExpr(matches[0][1], true)(proxy);
+          evaluated = compileExpr(matches[0][1], true)(proxy);
         } else {
-          ctx[key] = compileExpr(matches[0][1], false)();
+          evaluated = compileExpr(matches[0][1], false)();
         }
+        if (evaluated !== undefined) {
+          ctx[key] = evaluated;
+        }
+        // if evaluated is undefined, leave key unset so component default can apply
         continue;
       } catch {}
       // If evaluation with globalCtx fails, keep raw braces for later interpolation
@@ -25,9 +30,16 @@ export function extractCtxFromEl(element, globalCtx = null) {
     if (proxy) {
       // Interpolate any braces using globalCtx for string props like "Hello {name}"
       try {
-        ctx[key] = val.replace(/\{([^}]+)\}/g, (_, expr) => {
-          try { return String(compileExpr(expr, true)(proxy)); } catch { return ""; }
+        const interpolated = val.replace(/\{([^}]+)\}/g, (_, expr) => {
+          try {
+            const v = compileExpr(expr, true)(proxy);
+            return v === undefined ? "" : String(v);
+          } catch { return ""; }
         });
+        // If interpolation left empty and original had only braces, don't set to avoid "undefined"
+        if (interpolated !== "" || !val.match(/^\{[^}]+\}$/)) {
+          ctx[key] = interpolated;
+        }
         continue;
       } catch {}
     }
