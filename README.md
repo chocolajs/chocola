@@ -39,4 +39,4 @@ Chocola 2 is in current development and will add CSR SPA and much more features!
 
 ## Documentation
 
-https://github.com/chocolajs/chocola/wiki/Overview
+https://github.com/chocolajs/chocola/tree/main/documentation
