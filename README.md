@@ -13,6 +13,8 @@ Import components. Instantiate them. Mount, update, remove. Client-side or serve
 
 ```html
 <script>
+    import CoolButton from './CoolButton.html';
+
     let self;
     let input;
 
@@ -27,6 +29,7 @@ Import components. Instantiate them. Mount, update, remove. Client-side or serve
     <div>
         <h1>{title}</h1>
         <input bind:self="input" type="text" placeholder="Your name">
+        <CoolButton label="Not lame button"></CoolButton>
     </div>
 </template>
 
