@@ -1,0 +1,18 @@
+<script>
+  export let action = null;
+  function $runtime(self, ctx) {
+    if (self.onclick) {
+      self.onclick = null;
+    }
+  }
+</script>
+<template>
+  <button class="action" bind:onclick="action">
+    <slot></slot>
+  </button>
+</template>
+<style>
+  .action {
+    color: red;
+  }
+</style>

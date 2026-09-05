@@ -1,0 +1,3 @@
+{
+  "bundle": { "srcDir": "src", "outDir": "dist" }
+}

@@ -1,0 +1,22 @@
+<script>
+  export let count = 0;
+  let span;
+  let btn;
+  function $runtime() {
+    btn.addEventListener("click", () => {
+      count++;
+      span.textContent = count;
+    });
+  }
+</script>
+<template>
+  <div class="counter">
+    <span bind:self="span">{count}</span>
+    <button bind:self="btn">+</button>
+  </div>
+</template>
+<style>
+  .counter {
+    font-weight: bold;
+  }
+</style>

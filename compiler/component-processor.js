@@ -1,7 +1,7 @@
 import path from "path";
 import { parseHTML } from "linkedom";
 import { protectCurlyBraces } from "../utils.js";
-import { genRandomId, incrementAlfabet, throwError, deterministicHash, warnConstantCondition, warnUnusedDeclaration, findElementLine } from "./utils.js";
+import { genRandomId, runtimeFunctionId, throwError, deterministicHash, warnConstantCondition, warnUnusedDeclaration, findElementLine } from "./utils.js";
 import {
   extractPropsDefaults, extractRuntime, extractTopLevelFunctions, extractTopLevelVariables,
   extractCtxFromEl, hasMountIf, getMountIf,
@@ -13,11 +13,10 @@ import chalk from "./chalk.js";
 
 
 class ProcessContext {
-  constructor(loadedComponents, runtimeChunks, compIdColl, letterState, runtimeMap, cssScopes, cssScopesMap, scopedStyles, staticCtxRegistry, csrClasses) {
+  constructor(loadedComponents, runtimeChunks, compIdColl, runtimeMap, cssScopes, cssScopesMap, scopedStyles, staticCtxRegistry, csrClasses) {
     this.loadedComponents = loadedComponents;
     this.runtimeChunks = runtimeChunks;
     this.compIdColl = compIdColl;
-    this.letterState = letterState;
     this.runtimeMap = runtimeMap;
     this.cssScopes = cssScopes;
     this.cssScopesMap = cssScopesMap;
@@ -238,7 +237,8 @@ export function processComponentElement(
   cx,
   renderChain = [],
   sourceFile,
-  sourceContent
+  sourceContent,
+  globalCtx = {}
 ) {
   const tagName = element.tagName.toLowerCase();
   const compName = tagName + ".html";
@@ -276,7 +276,12 @@ export function processComponentElement(
   if (cx.staticCtxRegistry && cx.staticCtxRegistry.has(element)) {
     ctx = cx.staticCtxRegistry.get(element);
   } else {
-    ctx = extractCtxFromEl(element);
+    ctx = extractCtxFromEl(element, globalCtx);
+    if (globalCtx && typeof globalCtx === "object") {
+      for (const [k, v] of Object.entries(globalCtx)) {
+        if (!(k in ctx)) ctx[k] = v;
+      }
+    }
     cx.staticCtxRegistry && cx.staticCtxRegistry.set(element, ctx);
   }
 
@@ -371,7 +376,7 @@ export function processComponentElement(
       const tag = child.tagName.toLowerCase();
       const warnIfConstant = (expr, attr) => {
         const { constant, value } = evaluateConstant(expr);
-        if (constant) warnConstantCondition(location, tag, attr, Boolean(value));
+        if (constant) warnConstantCondition(location, tag, attr, expr, Boolean(value));
       };
       if (hasIf) warnIfConstant(stripBraces(child.getAttribute("if")), "if");
       if (hasDelIf) warnIfConstant(stripBraces(getMountIf(child)), "mount:if");
@@ -470,7 +475,8 @@ export function processComponentElement(
       cx,
       renderChain.concat(compName),
       compName,
-      template
+      template,
+      globalCtx
     );
 
     let condTarget = child;
@@ -491,7 +497,8 @@ export function processComponentElement(
 
   if (firstChild && firstChild.nodeType === 1) {
     if (script) {
-      const compId = "chid-" + genRandomId(cx.compIdColl);
+      const compId = "chid-" + deterministicHash(compName + ":" + cx.compIdColl.length, 8);
+      cx.compIdColl.push(compId);
       firstChild.setAttribute("chid", compId);
 
       const ctxRegex = /ctx\s*=\s*({.*?})/;
@@ -527,10 +534,10 @@ export function processComponentElement(
       let runtime = extractRuntime(script, compName);
 
       if (runtime) {
-        let letterEntry = cx.runtimeMap && cx.runtimeMap.get(compName);
-        let letter;
-        if (!letterEntry) {
-          letter = getNextLetter(cx.letterState);
+        let fnEntry = cx.runtimeMap && cx.runtimeMap.get(compName);
+        let fnId;
+        if (!fnEntry) {
+          fnId = runtimeFunctionId(compName);
           const topFuncs = topFuncSrc;
 
           let injectCode = ctxDef;
@@ -553,15 +560,15 @@ export function processComponentElement(
           }
           runtime = runtime.replace(/\$runtime\([^)]*\)\s*\{/, match => match + "\n" + injectCode);
 
-          runtime = runtime.replace(`${RUNTIME_KW}()`, `${letter}r(self, ctx)`);
+          runtime = runtime.replace(`${RUNTIME_KW}()`, `${fnId}(self, ctx)`);
           csrRuntimeSource = runtime.replace(/^function\s+\w+/, "function");
           cx.runtimeChunks.push(runtime);
-          cx.runtimeMap && cx.runtimeMap.set(compName, { letter });
+          cx.runtimeMap && cx.runtimeMap.set(compName, { fnId });
         } else {
-          letter = letterEntry.letter;
+          fnId = fnEntry.fnId;
         }
 
-        cx.runtimeChunks.push(`${letter}r(document.querySelector('[chid="${compId}"]'), ${JSON.stringify(ctx)});`);
+        cx.runtimeChunks.push(`${fnId}(document.querySelector('[chid="${compId}"]'), ${JSON.stringify(ctx)});`);
       }
     }
   }
@@ -591,9 +598,9 @@ export function processComponentElement(
   return firstChild && firstChild.nodeType === 1 ? firstChild : true;
 }
 
-export function processAllComponents(appElements, loadedComponents, pageSourceFile, pageSourceContent) {
+export function processAllComponents(appElements, loadedComponents, pageSourceFile, pageSourceContent, globalCtx = {}) {
   const cx = new ProcessContext(
-    loadedComponents, [], [], { value: null }, new Map(), [], new Map(), [], new Map(), new Map()
+    loadedComponents, [], [], new Map(), [], new Map(), [], new Map(), new Map()
   );
 
   for (const [compName, instance] of cx.loadedComponents) {
@@ -613,7 +620,7 @@ export function processAllComponents(appElements, loadedComponents, pageSourceFi
 
   appElements.forEach(el => {
     if (!el.isConnected) return;
-    processComponentElement(el, cx, [], pageSourceFile, pageSourceContent);
+    processComponentElement(el, cx, [], pageSourceFile, pageSourceContent, globalCtx);
   });
   const runtimeScript = cx.runtimeChunks.join("\n");
   const hasComponents = cx.runtimeChunks.length > 0;
@@ -626,15 +633,6 @@ export function processAllComponents(appElements, loadedComponents, pageSourceFi
   }
 
   return { runtimeScript, hasComponents, scopesCss, hashMap, csrClasses };
-}
-
-function getNextLetter(letterState) {
-  if (!letterState.value) {
-    letterState.value = "a";
-  } else {
-    letterState.value = incrementAlfabet(letterState.value);
-  }
-  return letterState.value;
 }
 
 const RUNTIME_KW = "$runtime";

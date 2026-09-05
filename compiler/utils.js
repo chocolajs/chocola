@@ -6,18 +6,18 @@ export function throwError(err) {
   throw new Error(err);
 }
 
-export function warnConstantCondition(location, tag, attr, truthy) {
+export function warnConstantCondition(location, tag, attr, expr, truthy) {
   const article = /^[aeiou]/.test(attr) ? "an" : "a";
   console.warn(
-    chalk.bold.yellow("WARNING!"),
-    `${location}: <${tag}> has ${article} \`${attr}\` condition that is always ${truthy ? "truthy" : "falsy"}`
+    chalk.bold.yellow("WARN "),
+    `${chalk.bold.green(location)} ${chalk.dim('—')} ${chalk.blue(`<${tag}>`)} \`${chalk.bold(attr + "={" + expr + "}")}\` is always ${chalk.green(truthy ? "truthy" : "falsy")}`
   );
 }
 
 export function warnUnusedDeclaration(location, kind, name) {
   console.warn(
-    chalk.bold.yellow("WARNING!"),
-    `${location}: ${kind} \`${name}\` is never used`
+    chalk.bold.yellow("WARN "),
+    `${chalk.bold.green(location)} ${chalk.dim('—')} ${kind} \`${chalk.blue(name)}\` is never used`
   );
 }
 
@@ -100,24 +100,6 @@ export function genRandomId(collection = null, length = 10, lettersOnly = false)
   }
 }
 
-export function incrementAlfabet(letters) {
-  let arr = letters.split("");
-  let i = arr.length - 1;
-
-  while (i >= 0) {
-    let pos = arr[i].charCodeAt(0) - 97;
-    if (pos < 25) {
-      arr[i] = String.fromCharCode(pos + 97 + 1);
-      return arr.join("");
-    } else {
-      arr[i] = "a";
-      i--;
-    }
-  }
-
-  return "a" + arr.join("");
-}
-
 export function deterministicHash(content, length = 8) {
   const hash = createHash("sha256").update(content).digest();
   let result = "";
@@ -125,6 +107,10 @@ export function deterministicHash(content, length = 8) {
     result += String.fromCharCode(97 + (hash[i % hash.length] % 26));
   }
   return result;
+}
+
+export function runtimeFunctionId(compName) {
+  return "r_" + deterministicHash(compName, 8);
 }
 
 const ID_LETTERS = "abcdefghijklmnopqrstuvwxyz";
