@@ -29,13 +29,17 @@ One great way you can contribute to the project without writing any code is to h
 
 ## The process
 
+### RFCs
+
+If you'd like to propose an implementation for a large new feature or change then please create an [RFC](https://github.com/chocolajs/rfcs) to discuss it up front.
+
 ### Roadmap
 
 When deciding where to contribute, you may wish to take a look at the [roadmap](https://github.com/chocolajs/chocola/blob/main/ROADMAP.md). Chocola development generally works on a single major effort at a time. This has a couple benefits for maintainers. First, it allows to focus and make noticeable progress in an area being proactive rather than reactive. Secondly, it allows to handle related issues and PRs together. By batching issues and PRs together we’re able to ensure implementations and fixes holistically address the set of problems and use cases encountered by users.
 
 ### Prioritization
 
-I do my best to review PRs as they are sent, but it is difficult to keep up. Help in reviewing PRs, RFCs, and issues is welcomed. If an item aligns with the current priority on the [roadmap](https://github.com/chocolajs/chocola/blob/main/ROADMAP.md), it is more likely to be reviewed quickly. PRs to the most important and active repositories get reviewed more quickly while PRs to smaller inactive repos may sit for a bit before someone periodically come by and review the pending PRs in a batch.
+I do my best to review PRs and RFCs as they are sent, but it is difficult to keep up. Help in reviewing PRs, RFCs, and issues is welcomed. If an item aligns with the current priority on the [roadmap](https://github.com/chocolajs/chocola/blob/main/ROADMAP.md), it is more likely to be reviewed quickly. PRs to the most important and active repositories get reviewed more quickly while PRs to smaller inactive repos may sit for a bit before someone periodically come by and review the pending PRs in a batch.
 
 ## Bugs
 
