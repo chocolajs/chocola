@@ -28,11 +28,14 @@
     "url": "https://github.com/sponsors/chocolajs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test \"tests/**/*.test.js\"",
+    "bench": "node bench/index.js",
+    "bench:csv": "node bench/index.js --csv"
   },
   "exports": {
     "./compiler": "./compiler/index.js",
-    "./dev": "./dev/index.js"
+    "./dev": "./dev/index.js",
+    "./server": "./server/index.js"
   },
   "dependencies": {
     "linkedom": "^0.18.13"

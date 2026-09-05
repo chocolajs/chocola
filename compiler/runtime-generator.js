@@ -1,30 +1,24 @@
-import { promises as fs } from "fs";
-import path from "path";
-import { genRandomId } from "./utils.js";
+import { deterministicHash } from "./utils.js";
 
-export async function generateRuntimeScript(runtimeScript, outDirPath, csrSource, csrClasses) {
-  const fileIds = [];
-  const filenames = [];
+export function generateRuntimeScript(runtimeScript, csrSource, csrClasses) {
+  const files = [];
 
   if (csrSource) {
-    const name = "run-" + genRandomId(fileIds, 6) + ".js";
     const source = csrSource.replace(/^export\s+\{?\s*[^}]+\s*}?\s*;?\s*$/m, "");
-    await fs.writeFile(path.join(outDirPath, name), source);
-    filenames.push(name);
+    const name = "run-" + deterministicHash(source, 6) + ".js";
+    files.push({ path: name, content: source });
   }
 
   if (csrClasses) {
-    const name = "run-" + genRandomId(fileIds, 6) + ".js";
-    await fs.writeFile(path.join(outDirPath, name), csrClasses);
-    filenames.push(name);
+    const name = "run-" + deterministicHash(csrClasses, 6) + ".js";
+    files.push({ path: name, content: csrClasses });
   }
 
   if (runtimeScript) {
-    const name = "run-" + genRandomId(fileIds, 6) + ".js";
     const content = `document.addEventListener("DOMContentLoaded", () => {${runtimeScript}})`;
-    await fs.writeFile(path.join(outDirPath, name), content);
-    filenames.push(name);
+    const name = "run-" + deterministicHash(content, 6) + ".js";
+    files.push({ path: name, content });
   }
 
-  return filenames;
+  return files;
 }
