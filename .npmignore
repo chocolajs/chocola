@@ -7,9 +7,10 @@ ROADMAP.md
 *.log
 package-lock.json
 .vscode/
-docs/
-COMPILER_FLOW.md
-LEAD.md
 *.tgz
 documentation/
 .gitattributes
+.github
+CONTRIBUTING.md
+.editorconfig
+specs/
