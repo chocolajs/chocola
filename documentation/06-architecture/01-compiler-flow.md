@@ -5,9 +5,11 @@ description: How the Chocola compiler works internally
 
 ## Entry Point
 
-**`chocola/compiler`** — the public API. Import `{ app }` from `"chocola/compiler"` and call `app.build(rootDir)`, which delegates to `compiler/index.js`.
+**`chocola/compiler`** — the public API. Import `{ app }` from `"chocola/compiler"` and call `app.build(rootDir)`, which delegates to `compiler/index.js`. Also exports `buildModuleGraph(rootDir)`, `renderPage(graph, ctx)`, and `emit(graph)` for advanced use.
 
-**`chocola/dev`** — the dev server API. Import `{ dev }` from `"chocola/dev"` and call `dev.server(rootDir)`.
+**`chocola/dev`** — the dev server API. Import `{ dev }` from `"chocola/dev"` and call `dev.server(rootDir)` for local development with hot-reload.
+
+**`chocola/server`** — the production SSR API. Import `{ createHandler, createServer, serve }` from `"chocola/server"` (see [SSR server](#8-output) and `server/index.js`).
 
 ## Compilation Pipeline
 
@@ -49,7 +51,7 @@ description: How the Chocola compiler works internally
 
 - Creates a DOM from the index file using linkedom's `parseHTML` (curly braces protected first)
 - Validates an `<app>` root element exists
-- Evaluates page-level conditionals (`if`/`mount:if`/`elif`/`else`) on the children of `<app>` via `processPageConditionals` (defined in `compiler/render.js`, recursing into remaining descendants) — these run in a page context, not a component context
+- Evaluates page-level conditionals (`if`/`mount:if`/`elif`/`else`) on the children of `<app>` via `processPageConditionals(parent, sourceFile, sourceContent, ctx)` (defined in `compiler/render.js`, recursing into remaining descendants) — evaluated against the per-request `ctx` (query + middleware) so `{props}` and `mount:if` can vary per request
 - Extracts all descendant elements inside `<app>` for component processing
 - Extracts `<link>` elements (stylesheets, icons) for asset processing
 
@@ -77,7 +79,7 @@ For each element inside `<app>`:
    - `<void else>` — chain-aware fallback
    - `<void>` — always renders children unwrapped (fragment-like)
 9. **Import scanning** — scans component `<script>` for `import X from "./Y.html"` statements. For each match, resolves the imported component by basename, calls `generateCSRClass()` to produce a CSR subclass for it, and strips the import line from the script.
-10. **Runtime ID** — if the component has a `<script>` and at least one element root, assigns a unique `chid` attribute to the first element root
+10. **Runtime ID** — if the component has a `<script>` and at least one element root, assigns a deterministic `chid` attribute (`chid-<hash>` from `componentName:index`) to the first element root
 11. **CSS Scoping** — every component gets a deterministic hash class on its root element derived from the component filename. If the component has `<style>`, the selectors are rewritten under that class:
     - Simple selectors (`.foo`) generate both AND-scoped (`.cssId.foo`) and descendant-scoped (`.cssId .foo`) variants
     - Selectors with combinators use descendant scoping only
@@ -90,7 +92,7 @@ For each element inside `<app>`:
 
 - The base class source is read from `runtime/index.js` in `compiler/render.js` (`new URL("../runtime/index.js", import.meta.url)`) and passed in as `csrSource`
 - `generateRuntimeScript` strips the `export` statement (output is a non-module script so the class is globally accessible)
-- Returns up to three `run-<random>.js` file descriptors — the base class (when `csrSource` is present), CSR subclasses (when any exist), and SSG `DOMContentLoaded` chunks (when components have runtimes) — which `compiler/index.js` `emit()` writes to the output directory
+- Returns up to three `run-<hash>.js` file descriptors (hash of content, `deterministicHash(content, 6)`) — the base class (when `csrSource` is present), CSR subclasses (when any exist), and SSG `DOMContentLoaded` chunks (when components have runtimes) — which `compiler/index.js` `emit()` writes to the output directory
 
 ### 6a. CSR Class Generation (`compiler/component-processor.js` — `generateCSRClass`)
 
@@ -111,10 +113,10 @@ The class name respects the original import casing when triggered by an `import`
 
 Asset functions mutate the DOM but never write — they collect `{ path, content }` file and `{ from, to }` copy descriptors that `emit()` writes:
 
-- **Stylesheets** — reads local CSS files, assigns random filenames, updates `<link>` hrefs
+- **Stylesheets** — reads local CSS files, assigns deterministic `css-<hash>.css` filenames (hash of content), updates `<link>` hrefs
 - **Icons** — stages icon files for copying to output
-- **Scoped CSS** — collects component-scoped CSS as `sc-<random>.css`, appends `<link>` to document head
-- **Scripts** — reads local `<script src>` files, assigns random filenames, rewrites the `src` attribute (preserving inline content and other attributes)
+- **Scoped CSS** — collects component-scoped CSS as `sc-<hash>.css` (hash of content, `deterministicHash`), appends `<link>` to document head
+- **Scripts** — reads local `<script src>` files, assigns deterministic `js-<hash>.js` filenames (hash of content), rewrites the `src` attribute (preserving inline content and other attributes)
 - **Static assets** — stages the `src/static/` directory for copying to the output directory
 
 ### 8. Output (`compiler/index.js` — `emit(graph)`)
@@ -125,6 +127,7 @@ Asset functions mutate the DOM but never write — they collect `{ path, content
 - Writes `index.html` and every collected CSS/JS file descriptor to the output directory
 - Executes copy operations (icons, static assets)
 - Writes component hash map to `.chocola/hashes.json` for debugging reference
+- In SSR (`chocola/server`), the same `{ html, files, copies, hashMap }` from `renderPage(graph, ctx)` is used to serve virtual assets with `ETag`/`Last-Modified`/`gzip` without writing to disk
 
 ## Data Flow Diagram
 
@@ -141,8 +144,10 @@ compiler/index.js
   ├─ component-processor.js → processAllComponents, processComponentElement, generateCSRClass (CSR subclass generation)
   ├─ parser/index.js      → validateChainStructure (template.js), scopeCss (css.js), compileExpr,
   │                          conditional evaluation, interpolation, props/runtime extraction
-  ├─ runtime-generator.js → generateRuntimeScript — returns run-*.js descriptors for the base class, CSR classes, and SSG calls
+  ├─ runtime-generator.js → generateRuntimeScript — returns run-<hash>.js descriptors for the base class, CSR classes, and SSG calls
   └─ .chocola/hashes.json → component-to-hash reference map (written after build)
+
+server/index.js           → createHandler/createServer/serve — per-request renderPage(graph, ctx) with ETag/gzip, middleware, static serving
 ```
 
 ## Key Concepts

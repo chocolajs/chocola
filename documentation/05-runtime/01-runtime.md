@@ -86,7 +86,7 @@ You can declare functions and variables at the top level of `<script>` and call 
     }
 
     function $runtime() {
-        btn.addEventlistener("click", () => {
+        btn.addEventListener("click", () => {
             format(price * 0.85)
         });
     }
