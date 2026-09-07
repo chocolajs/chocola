@@ -1,5 +1,13 @@
 # Chocola Changelog
 
+## 2.0.0-next.10 (Sep 06, 2026)
+
+- Added server-side rendering: you can now deploy with `chocola/server` to render pages per request, with built-in handling for query params, middleware, and static assets (including caching and compression) ([#118](https://github.com/chocolajs/chocola/issues/118))
+- Builds are now deterministic: same source always produces the same output, which improves caching and prepares for HMR ([#118](https://github.com/chocolajs/chocola/issues/118))
+- Clearer build warnings for always-truthy/falsy conditions now point to the exact file and line ([#118](https://github.com/chocolajs/chocola/issues/118))
+- Updated documentation and roadmap to reflect SSR and the current V2 progress ([#134](https://github.com/chocolajs/chocola/issues/134), [#121](https://github.com/chocolajs/chocola/issues/121), [#130](https://github.com/chocolajs/chocola/issues/130))
+- Added contributor guide (`CONTRIBUTING.md`) and issue templates to make contributing easier ([#119](https://github.com/chocolajs/chocola/issues/119), [#111](https://github.com/chocolajs/chocola/issues/111))
+
 ## 2.0.0-next.9 (Aug 10, 2026)
 - Added compile-time warnings for conditional blocks that are always truthy or falsy [[#31](https://github.com/chocolajs/chocola/issues/31)]
 - Added error logging for `if` blocks in `index.html` [[#38](https://github.com/chocolajs/chocola/issues/38)]

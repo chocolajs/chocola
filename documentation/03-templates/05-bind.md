@@ -1,6 +1,6 @@
 ---
 title: bind:*
-description: Manipualte DOM elements in a safe way
+description: Manipulate DOM elements in a safe way
 ---
 
 Use `bind:*` attributes to capture DOM element references or their properties directly into script variables. Bindings are evaluated at mount time, before `$runtime` runs.
@@ -9,7 +9,7 @@ Use `bind:*` attributes to capture DOM element references or their properties di
 <script>
     let self;
     let input;
-    let inputTypeg;
+    let inputType;
 
     function $runtime() {
         input.focus();

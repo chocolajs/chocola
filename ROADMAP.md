@@ -19,7 +19,7 @@ Introduces the `$` prefix.
 - [x] `bind:` DOM manipulation
 - [x] Deterministic hashing
 - [x] Declarative components imports
-- [ ] (**current milestone**) Limited SSR (designed for using plugins and middlewere for extensible production deployment)
+- [x] Limited SSR (designed for using plugins and middleware for extensible production deployment); single process, no dynamic params/body parsing yet
 - [ ] HMR dev server
 - [ ] ESM modules and dependencies bundling
 - [ ] `for:each` and `switch/case` directives

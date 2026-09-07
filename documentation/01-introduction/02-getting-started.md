@@ -27,14 +27,19 @@ npm install chocola
 ```json
 {
   "bundle": {
-    "srcDir": "/src",
-    "outDir": "/dist",
-    "libDir": "/lib",
+    "srcDir": "src",
+    "outDir": "dist",
+    "libDir": "lib",
     "emptyOutDir": true
   },
   "dev": {
     "hostname": "localhost",
     "port": 3000
+  },
+  "server": {
+    "port": 8080,
+    "hostname": "localhost",
+    "middleware": "./middleware.js"
   }
 }
 ```
@@ -53,7 +58,7 @@ const __dirname = path.dirname(__filename);
 app.build(__dirname);
 ```
 
-## 5. Create `chocola.server.js`
+## 5. Create `chocola.server.js` — Dev server
 
 ```js
 // file: chocola.server.js
@@ -65,6 +70,25 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dev.server(__dirname);
+```
+
+For production SSR, create a separate entry (e.g. `server.js`):
+
+```js
+// file: server.js
+import { serve } from "chocola/server";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// honors chocola.config.json -> server.port / hostname / middleware
+serve(__dirname);
+
+// Or bare handler: import { createHandler } from "chocola/server";
+// const handler = await createHandler(__dirname);
+// http.createServer(handler).listen(8080);
 ```
 
 ## 6. Initialize your index page
@@ -85,4 +109,4 @@ Write something in your `src/index.html` index page. Remember to include an `<ap
 </html>
 ```
 
-Now you're all set! Run `node chocola.server.js` to see your app in the browser.
+Now you're all set! Run `node chocola.server.js` for local dev with hot-reload, `node chocola.js` for a static build, or `node server.js` for SSR.

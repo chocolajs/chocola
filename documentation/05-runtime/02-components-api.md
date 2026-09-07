@@ -66,7 +66,7 @@ For removing a instantiated component from your app, use the `remove()` method.
 ```js
 import ChatBubble from "./ChatBubble.html";
 
-let self =;
+let self;
 
 function createBubble() {
     const newBubble = new ChatBubble();
