@@ -3,19 +3,43 @@ title: Compiler flow
 description: How the Chocola compiler works internally
 ---
 
-## Entry Point
+## Summary
 
-**`chocola/compiler`** — the public API. Import `{ app }` from `"chocola/compiler"` and call `app.build(rootDir)`, which delegates to `compiler/index.js`. Also exports `buildModuleGraph(rootDir)`, `renderPage(graph, ctx)`, and `emit(graph)` for advanced use.
+The process starts at the entry point and then moves through eight stages. Each stage produces output which is then used by the next one. You can scan the summaries below to get the whole flow and then dive into code details only where you need to.
 
-**`chocola/dev`** — the dev server API. Import `{ dev }` from `"chocola/dev"` and call `dev.server(rootDir)` for local development with hot-reload.
+1. [Configuration loads project settings](#1-configuration) so later stages know where to find sources and where to write output.
+2. [Graph build creates an in-memory map](#2-graph-build) of pages, components, and assets without writing to disk.
+3. [Inventorying of available components](#3-component-discovery) from the components directory.
+4. [DOM processing parses the source page](#4-dom-processing) and validates the app container while handling page-level conditionals.
+5. [Component processing expands and scopes each component](#5-component-processing) inside the app container.
+6. [Runtime generation prepares browser scripts](#6-runtime-generation) that power client-side interactivity.
+7. [Asset processing collects stylesheets, icons, and scripts](#7-asset-processing) and assigns stable hashed filenames.
+8. [Output writes the final site to disk](#8-output) or keeps it in memory for the SSR server to serve.
 
-**`chocola/server`** — the production SSR API. Import `{ createHandler, createServer, serve }` from `"chocola/server"` (see [SSR server](#8-output) and `server/index.js`).
+## Entry point
+
+The compiler can be used from three public entry points depending on the workflow. For a static build you call the build function with a project directory. For local development you start the dev server, which adds hot reload on top of the same pipeline. For production server rendering you create a request handler that reuses the compiled graph. Each of these is a thin wrapper which then delegates to the internal pipeline described below.
+
+#### How it works
+
+* The static build is exposed as `app.build` from `chocola/compiler`. This function is implemented in `compiler/index.js` and it orchestrates the full pipeline.
+* For advanced use the same package also exports `buildModuleGraph` and `renderPage` and `emit`. These let you run graph building and rendering separately.
+* The dev entry point is `dev.server` from `chocola/dev`. It wraps the compiler with a file watcher.
+* The SSR entry point is `createHandler` and `createServer` and `serve` from `chocola/server`. These are implemented in `server/index.js`. See also the [Output](#8-output) section and the SSR server documentation.
 
 ## Compilation Pipeline
 
-### 1. Configuration (`compiler/config.js`)
+### 1. Configuration
 
-`loadConfig(rootDir)` reads `chocola.config.json` (via `utils.js`) and merges with defaults:
+This stage loads project settings so the rest of the pipeline knows where to find sources and where to write output. It takes the project root as input and produces a normalized configuration with absolute paths. Getting this right early avoids path errors in every later stage.
+
+#### How it works
+
+The settings are read from `chocola.config.json` in the project root. This is handled by `loadConfig` in `compiler/config.js`, which uses helpers in `utils.js` to read the file.
+
+If no config file is present, defaults are applied. The defaults include `srcDir` as `src`, `outDir` as `dist`, `libDir` as `lib` inside the source directory, and `emptyOutDir` as `true` to clean the output before a build.
+
+After that, `resolvePaths` in the same module turns the directory names into absolute paths. This result is then passed to graph building.
 
 | Key | Default | Description |
 |---|---|---|
@@ -24,110 +48,143 @@ description: How the Chocola compiler works internally
 | `libDir` | `"lib"` | Components directory (inside `srcDir`) |
 | `emptyOutDir` | `true` | Whether to clean output before build |
 
+### 2. Graph Build
 
-`resolvePaths()` resolves absolute paths for `outDir`, `src`, and `components`.
+This stage creates an in-memory map of pages, components, and assets without writing anything to disk. It discovers what exists in the file system and records how pages depend on components and how components depend on each other. This map becomes the shared foundation which is then used for both static builds and server rendering.
 
-### 2. Graph Build (`compiler/module-graph.js`)
+#### How it works
 
-`buildModuleGraph(rootDir)` performs discovery and parsing without writing anything:
+The main function is `buildModuleGraph` in `compiler/module-graph.js`.
 
-- Loads config and resolves paths
-- Loads the source index file (`index.html` from `srcDir`) as the page module
-- Discovers and parses all components from `src/lib/` as component modules
-- Adds asset modules for local stylesheets, icons, and scripts referenced by the page
-- Records edges: page → components → child components (tag usage + `import X from "..."`), plus asset links
-- Compiled module artifacts (scoped CSS hash, stable runtime id, parsed props/functions) are stored per module
+It starts by loading configuration and resolving paths, as described above. After that it loads the source index file, which is `index.html` inside the source directory, as the page module.
 
-`compile()` now reduces to `emit(buildModuleGraph())`.
+It then discovers and parses all component modules found under `src/lib`. For each component it also adds asset modules for local stylesheets and icons and scripts that the page references.
 
-### 3. Component Discovery (`compiler/pipeline.js`)
+Edges are recorded to show relationships. The page depends on components, and components may depend on child components. These links are found by looking for tag usage and for import statements of the form `import X from "..."`.
 
-`getComponents(libDir)`:
-- Reads all `.html` files in the components directory
-- Loads each file as a raw HTML string
-- Returns `{ loadedComponents, componentsLib, emptyComps }` — `loadedComponents` is a `Map<lowercase-filename, raw HTML string>`; `componentsLib` lists the file names; `emptyComps` lists empty files (warned about on load)
+Compiled artifacts are stored per module. This includes a scoped CSS hash and a stable runtime id and parsed props and functions. Once the graph is ready, the legacy `compile` helper simply calls `emit` with the result of `buildModuleGraph`.
 
-### 4. DOM Processing (`compiler/dom-processor.js`)
+### 3. Component Discovery
 
-- Creates a DOM from the index file using linkedom's `parseHTML` (curly braces protected first)
-- Validates an `<app>` root element exists
-- Evaluates page-level conditionals (`if`/`mount:if`/`elif`/`else`) on the children of `<app>` via `processPageConditionals(parent, sourceFile, sourceContent, ctx)` (defined in `compiler/render.js`, recursing into remaining descendants) — evaluated against the per-request `ctx` (query + middleware) so `{props}` and `mount:if` can vary per request
-- Extracts all descendant elements inside `<app>` for component processing
-- Extracts `<link>` elements (stylesheets, icons) for asset processing
+This stage builds an inventory of every component available to the project. It takes the components directory as input and produces a map from normalized file names to raw HTML strings. This inventory is needed so later stages can match tags to component definitions.
 
-### 5. Component Processing (`compiler/component-processor.js`)
+#### How it works
 
-For each element inside `<app>`:
+The work is done by `getComponents` in `compiler/pipeline.js`.
 
-1. **Match** — checks if tag name corresponds to a loaded component
-2. **Context** — extracts attributes as context
-3. **Chain validation** — validates `if`/`elif`/`else`/`mount:if` structure on both slot content and component body separately, throwing with file location on violation
-4. **Template** — renders component body via a DOM fragment (linkedom)
-5. **Slots** — replaces `<slot>` elements with the original inner HTML
-6. **Interpolation** — evaluates `{expr}` in element attributes (reserved and `bind:` attributes excluded) using `with(ctx)`; text-node `{expr}` is interpolated separately by `interpolateNode` after conditionals
-7. **Conditionals** — evaluates `if`, `mount:if`, `elif`, `else` attributes
-   - `if={expr}` — hides element (`display: none`) when falsy
-   - `mount:if={expr}` — removes element when falsy
-   - `elif={expr}` — alternative condition in a chain
-   - `else` — fallback in a chain
-   - Chained via `condChain` state tracked per-parent in a `Map`
-   - `else` closes the chain; non-conditional elements reset it
-   - `elif`/`else` without a preceding `if`/`mount:if` throws an error
-8. **Void elements** — `<void>` is a transparent conditional wrapper:
-   - `<void if={expr}>` — renders children unwrapped when truthy
-   - `<void elif={expr}>` — chain-aware alternative
-   - `<void else>` — chain-aware fallback
-   - `<void>` — always renders children unwrapped (fragment-like)
-9. **Import scanning** — scans component `<script>` for `import X from "./Y.html"` statements. For each match, resolves the imported component by basename, calls `generateCSRClass()` to produce a CSR subclass for it, and strips the import line from the script.
-10. **Runtime ID** — if the component has a `<script>` and at least one element root, assigns a deterministic `chid` attribute (`chid-<hash>` from `componentName:index`) to the first element root
-11. **CSS Scoping** — every component gets a deterministic hash class on its root element derived from the component filename. If the component has `<style>`, the selectors are rewritten under that class:
-    - Simple selectors (`.foo`) generate both AND-scoped (`.cssId.foo`) and descendant-scoped (`.cssId .foo`) variants
-    - Selectors with combinators use descendant scoping only
-    - `:root` and `:root.class` scope to the root element only
-12. **Runtime Chunk** — generates a runtime function call: `r_<hash>(el, ctx)` (the function id is a stable per-module hash of the component filename)
-13. **CSR Class** — if the component has a `$runtime` function and a CSR class hasn't already been generated (e.g., via import scanning), generates a `ChocolaComponent` subclass for client-side dynamic instantiation. The class name is derived from the filename (first letter capitalized), or from the import identifier when triggered by an `import` statement.
-14. **Recursion** — processes nested components within the current component (with cycle detection via `renderChain`)
+This function reads all files with an `html` extension in the components directory. For each file it loads the content as a raw HTML string.
 
-### 6. Runtime Generation (`compiler/runtime-generator.js`)
+It returns three collections. The first is `loadedComponents`, which is a map from lowercased file names to raw HTML. The second is `componentsLib`, which lists the file names that were found. The third is `emptyComps`, which lists empty files that triggered a warning on load.
 
-- The base class source is read from `runtime/index.js` in `compiler/render.js` (`new URL("../runtime/index.js", import.meta.url)`) and passed in as `csrSource`
-- `generateRuntimeScript` strips the `export` statement (output is a non-module script so the class is globally accessible)
-- Returns up to three `run-<hash>.js` file descriptors (hash of content, `deterministicHash(content, 6)`) — the base class (when `csrSource` is present), CSR subclasses (when any exist), and SSG `DOMContentLoaded` chunks (when components have runtimes) — which `compiler/index.js` `emit()` writes to the output directory
+### 4. DOM Processing
 
-### 6a. CSR Class Generation (`compiler/component-processor.js` — `generateCSRClass`)
+This stage turns the source index file into a DOM that can be transformed. It validates that the page has the expected root container and evaluates page-level conditionals so the rest of the pipeline sees the correct structure. It also extracts the lists of elements and assets that need further handling.
 
-Produces a `ChocolaComponent` subclass for any loaded component by name:
+#### How it works
 
-1. Loads the component instance (raw HTML) from `loadedComponents`
-2. Parses with linkedom to extract `<script>`, `<template>`, `<style>`
-3. Extracts props defaults and the `$runtime` function (if any)
-4. If `$runtime` exists: injects prop variable declarations (with defaults), top-level variable declarations, and top-level helper function definitions before the runtime body, then rewrites the function signature to `function(self, ctx)`
-5. Assigns or reuses a deterministic CSS hash for the component
-6. Scopes and collects styles
-7. Emits a class definition: `class X extends ChocolaComponent { constructor() { super({ template, hash, props, runtime?, children? }) } }`
-8. Stores the class definition in `cx.csrClasses` keyed by lowercased component filename
+DOM creation is handled by `createDOM` in `compiler/dom-processor.js`. This function uses `parseHTML` from linkedom to parse the index file, after first protecting curly braces so they are not mistaken for markup.
 
-The class name respects the original import casing when triggered by an `import` statement (e.g., `import CommonButton from "./CommonButton.html"` produces `class CommonButton`). When generated from HTML tag usage, the name is derived from the filename with only the first letter capitalized.
+Validation is performed by `validateAppContainer` in the same module, which checks that an `app` element exists. After that, page-level conditionals are evaluated. This is handled by `processPageConditionals` in `compiler/render.js`, which walks the children of the `app` element and recurses into remaining descendants.
 
-### 7. Asset Processing (`compiler/dom-processor.js` + `compiler/pipeline.js`)
+These conditionals include `if` and `mount:if` and `elif` and `else` attributes. They are evaluated against the per-request context, which combines query parameters and middleware results. This means that `props` interpolation and mount conditions can vary per request.
 
-Asset functions mutate the DOM but never write — they collect `{ path, content }` file and `{ from, to }` copy descriptors that `emit()` writes:
+Finally, two helpers collect what remains. `getAppElements` gathers descendant elements inside `app` for component processing, and `getAssetLinks` gathers link elements for asset processing.
 
-- **Stylesheets** — reads local CSS files, assigns deterministic `css-<hash>.css` filenames (hash of content), updates `<link>` hrefs
-- **Icons** — stages icon files for copying to output
-- **Scoped CSS** — collects component-scoped CSS as `sc-<hash>.css` (hash of content, `deterministicHash`), appends `<link>` to document head
-- **Scripts** — reads local `<script src>` files, assigns deterministic `js-<hash>.js` filenames (hash of content), rewrites the `src` attribute (preserving inline content and other attributes)
-- **Static assets** — stages the `src/static/` directory for copying to the output directory
+### 5. Component Processing
 
-### 8. Output (`compiler/index.js` — `emit(graph)`)
+This stage expands every element inside the app container into its final HTML. It matches tags to components, handles slots and conditionals and interpolation, scopes styles, and prepares runtime hooks. This is the most involved stage, which then hands off a fully expanded DOM to runtime and asset handling.
 
-- Appends runtime `<script>` tags to document body (during render)
-- Serializes the final HTML (restoring curly-brace placeholders) (during render)
-- Clears the output directory if `emptyOutDir` is enabled
-- Writes `index.html` and every collected CSS/JS file descriptor to the output directory
-- Executes copy operations (icons, static assets)
-- Writes component hash map to `.chocola/hashes.json` for debugging reference
-- In SSR (`chocola/server`), the same `{ html, files, copies, hashMap }` from `renderPage(graph, ctx)` is used to serve virtual assets with `ETag`/`Last-Modified`/`gzip` without writing to disk
+#### How it works
+
+Processing is orchestrated by `processAllComponents` in `compiler/component-processor.js`, which calls `processComponentElement` for each element.
+
+The steps for a single element are as follows.
+
+1. **Match.** The processor checks whether the tag name corresponds to a loaded component. This lookup uses the map built during discovery.
+
+2. **Context.** It extracts element attributes as a context object. This context is then used for interpolation and conditionals.
+
+3. **Chain validation.** It validates conditional chains on slot content and on the component body separately. The attributes involved are `if` and `elif` and `else` and `mount:if`. If the structure is invalid, it throws an error that includes the file location.
+
+4. **Template.** It renders the component body through a DOM fragment created with linkedom.
+
+5. **Slots.** It replaces `slot` elements with the original inner HTML of the usage site. This allows component authors to define insertion points.
+
+6. **Interpolation.** It evaluates expressions wrapped in curly braces inside element attributes. Reserved attributes and those prefixed with `bind:` are excluded. This step uses evaluation with the current context. Text-node interpolation is handled separately by `interpolateNode` after conditionals have been resolved.
+
+7. **Conditionals.** It evaluates conditional attributes on the element. The behavior is as follows. `if` hides the element with `display: none` when the expression is falsy. `mount:if` removes the element entirely when falsy. `elif` provides an alternative condition in a chain. `else` provides the fallback. Chains are tracked per parent in a map called `condChain`. An `else` closes the chain, while a non-conditional element resets it. An `elif` or `else` without a preceding `if` or `mount:if` throws an error.
+
+8. **Void elements.** The special tag `void` acts as a transparent conditional wrapper that never renders itself. A `void` with an `if` renders its children unwrapped when truthy. Similarly, `void` supports `elif` and `else` for chain-aware branching, and a bare `void` always renders its children unwrapped, similar to a fragment.
+
+9. **Import scanning.** The processor scans the component `script` block for import statements of the form `import X from "./Y.html"`. For each match it resolves the imported component by basename. This is then handled by `generateCSRClass` in the same module, which produces a CSR subclass for the imported component. The import line is then stripped from the script.
+
+10. **Runtime id.** If the component has a `script` block and at least one element root, the processor assigns a deterministic attribute named `chid`. The value is derived from the component name and its index, hashed as `chid-<hash>`, and placed on the first element root.
+
+11. **CSS scoping.** Every component receives a deterministic hash class on its root element, derived from the component filename. If the component has a `style` block, its selectors are rewritten to be scoped under that class. Simple selectors such as `.foo` generate both an AND-scoped variant and a descendant-scoped variant. Selectors that contain combinators use descendant scoping only. Selectors for `root` and `root` with a class are scoped to the root element only.
+
+12. **Runtime chunk.** For components that need client execution, a runtime call is generated. The call looks like `r_<hash>(el, ctx)` where the function id is a stable per-module hash of the component filename. This call is injected so the browser can re-run logic after load.
+
+13. **CSR class.** If the component defines a `$runtime` function and a CSR class has not already been generated via import scanning, the compiler generates a subclass of `ChocolaComponent`. This enables dynamic instantiation in the browser. The class name is derived from the filename with the first letter capitalized, or from the import identifier when triggered by an import statement.
+
+14. **Recursion.** The processor then handles nested components inside the current component. Cycle detection is performed via `renderChain` to prevent infinite recursion.
+
+### 6. Runtime Generation
+
+This stage prepares the JavaScript that will run in the browser. It takes the base class and any generated component classes as input and produces script files ready to be included in the output. Without this stage, interactive components would have no client-side behavior.
+
+#### How it works
+
+The base class source is read from `runtime/index.js`. This reading happens in `compiler/render.js` using a URL relative to that module, and the content is passed in as `csrSource`.
+
+Generation itself is handled by `generateRuntimeScript` in `compiler/runtime-generator.js`. This function strips the `export` statement because the output is a non-module script where the class is globally accessible.
+
+The function can return up to three file descriptors, each named `run-<hash>.js` where the hash is derived from the file content using `deterministicHash`. The three kinds are the base class when source is present, the CSR subclasses when any exist, and the SSG `DOMContentLoaded` chunks when components have runtimes. These descriptors are then written to the output directory by `emit` in `compiler/index.js`.
+
+#### 6a. CSR class generation
+
+This sub-step explains how a single CSR class is produced. It takes a component name as input and produces a class definition that extends the base component.
+
+#### How it works
+
+The logic lives in `generateCSRClass` in `compiler/component-processor.js`.
+
+First it loads the component instance from `loadedComponents` using the lowercased filename. It then parses the raw HTML with linkedom to extract the `script` and `template` and `style` sections.
+
+Next it extracts prop defaults and the `$runtime` function if one exists. When a runtime is present, it injects prop variable declarations with defaults, along with top-level variable declarations and helper function definitions, before the runtime body. It then rewrites the function signature to `function(self, ctx)`.
+
+After that it assigns or reuses a deterministic CSS hash for the component and scopes and collects any styles. Finally it emits a class definition of the form `class X extends ChocolaComponent` with a constructor that calls `super` using the template and hash and props and optional runtime and children. The definition is stored in `cx.csrClasses` keyed by the lowercased filename. When triggered by an import statement, the class name respects the original import casing, for example `import CommonButton from "./CommonButton.html"` produces `class CommonButton`.
+
+### 7. Asset Processing
+
+This stage gathers all static assets referenced by the page and components. It assigns stable filenames based on content hashes and updates references in the DOM. It does not write files yet. Instead it collects descriptors which are then handed to the output stage.
+
+#### How it works
+
+Asset helpers live in `compiler/dom-processor.js` and `compiler/pipeline.js`. These functions mutate the DOM but only collect descriptors of the form `{ path, content }` for files and `{ from, to }` for copies.
+
+Stylesheets are handled by `processStylesheet` in `compiler/pipeline.js`. This function reads each local CSS file and assigns a deterministic filename of the form `css-<hash>.css` where the hash is derived from the content. It then updates the `link` href in the DOM.
+
+Icons are handled by `processIcons` in the same module, which stages icon files for copying to the output directory.
+
+Scoped component CSS is collected as `sc-<hash>.css` where the hash comes from `deterministicHash`. A `link` element for this file is then appended to the document head via `appendStylesheetLink` in `compiler/dom-processor.js`.
+
+Scripts are handled by `processScript` in `compiler/pipeline.js`. This function reads each local script file referenced by a `script src` attribute and assigns a filename of the form `js-<hash>.js` based on the content. It rewrites the `src` attribute while preserving inline content and other attributes.
+
+Static assets are handled by `copyStaticDir` in `compiler/pipeline.js`, which stages the `src/static` directory for copying to the output directory.
+
+### 8. Output
+
+This stage produces the final result that users see. For a static build it writes HTML and assets to disk. For server rendering it keeps the same data in memory so it can be served per request. In both cases it takes the rendered DOM and the collected file and copy descriptors as input.
+
+#### How it works
+
+The main function is `emit` in `compiler/index.js`.
+
+During rendering, runtime `script` tags are appended to the document body via `appendRuntimeScript` in `compiler/dom-processor.js`. The final HTML is then serialized via `serializeDOM` in the same module, which restores curly-brace placeholders.
+
+If `emptyOutDir` is enabled, `emit` clears the output directory first. After that it writes `index.html` and every collected CSS and JS file descriptor to the output directory. It then executes copy operations for icons and static assets, and writes the component hash map to `.chocola/hashes.json` for debugging reference.
+
+When running under `chocola/server`, the same data that `renderPage` returns, namely `html` and `files` and `copies` and `hashMap`, is used differently. Instead of writing to disk, the server keeps these virtual assets in memory and serves them with caching headers such as `ETag` and `Last-Modified` and with `gzip` compression, without touching the file system.
 
 ## Data Flow Diagram
 
@@ -156,9 +213,9 @@ server/index.js           → createHandler/createServer/serve — per-request r
 - **File-based loading**: `.html` component files are loaded as raw strings and parsed by the compiler
 - **CSS Scoping**: Component styles are scoped by rewriting selectors under a deterministic hash class derived from the component filename. The hash class is always present on every component's root element, even without styles, serving as a stable component identifier. Both root and descendant matching via dual selectors (AND + descendant).
 - **Hash reference map**: `.chocola/hashes.json` is written after each build, mapping component filenames to their hash classes for debugging. It is auto-generated and should be gitignored.
-- **Runtime scripts**: Components with a `$runtime` function get a unique `chid` and a runtime call (`r_<hash>(el, ctx)`) that re-runs the `$runtime` function on `DOMContentLoaded`
+- **Runtime scripts**: Components with a `$runtime` function get a unique `chid` and a runtime call of the form `r_<hash>(el, ctx)` that re-runs the `$runtime` function on `DOMContentLoaded`
 - **Client-Side Rendering (CSR)**: The `ChocolaComponent` base class (`runtime/index.js`) allows dynamic component instantiation in the browser via `mount`, `remove`, and `update` methods. It supports `bind:*` attributes, conditionals, slots, expression interpolation, and automatic event-listener cleanup.
 - **Component imports**: Component `<script>` blocks can use `import X from "./Y.html"` syntax. The compiler resolves these imports to known components, generates CSR subclasses for them, and strips the import lines from the build output. Imported components can be instantiated with `new X().mount(target, props)` in the `$runtime` function.
-- **CSR class naming**: When triggered by an `import` statement, the generated class matches the imported identifier casing (e.g., `import CommonButton` → `class CommonButton`). When generated from HTML tag usage, the name is derived from the filename with only the first letter capitalized.
-- **Conditional chains**: `if`/`mount:if`/`elif`/`else` form sibling chains tracked per-parent; validated structurally before rendering with file location (line included when the error is within the same source file)
+- **CSR class naming**: When triggered by an `import` statement, the generated class matches the imported identifier casing (for example `import CommonButton` produces `class CommonButton`). When generated from HTML tag usage, the name is derived from the filename with only the first letter capitalized.
+- **Conditional chains**: `if` and `mount:if` and `elif` and `else` form sibling chains tracked per-parent; validated structurally before rendering with file location (line included when the error is within the same source file)
 - **Void elements**: `<void>` acts as a transparent wrapper that never renders itself; useful for conditional rendering without extra DOM nodes
