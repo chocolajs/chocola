@@ -20,6 +20,7 @@ Introduces the `$` prefix.
 - [x] Deterministic hashing
 - [x] Declarative components imports
 - [x] Limited SSR (designed for using plugins and middleware for extensible production deployment); single process, no dynamic params/body parsing yet
+- [ ] (**current development**) Implement real isomorphism ([RFC #2](https://github.com/chocolajs/rfcs/blob/main/text/0000-server-resolved-script-runtime.md): server-resolved logic)
 - [ ] HMR dev server
 - [ ] ESM modules and dependencies bundling
 - [ ] `for:each` and `switch/case` directives
