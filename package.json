@@ -38,6 +38,7 @@
     "./server": "./server/index.js"
   },
   "dependencies": {
+    "acorn": "^8.18.0",
     "linkedom": "^0.18.13"
   }
 }

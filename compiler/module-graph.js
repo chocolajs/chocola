@@ -8,7 +8,7 @@ import { protectCurlyBraces } from "../utils.js";
 import { deterministicHash, runtimeFunctionId } from "./utils.js";
 import { createDOM, getAssetLinks, getScriptElements } from "./dom-processor.js";
 import {
-  extractPropsDefaults, extractTopLevelFunctions, extractTopLevelVariables,
+  extractPropsDefaults, extractTopLevelFunctions, extractTopLevelVariables, parseScript,
 } from "../parser/index.js";
 
 const RUNTIME_KW = "$runtime";
@@ -92,13 +92,29 @@ function compileComponentModule(module, graph) {
 
   const deps = new Set();
   if (module.script) {
-    const importRegex = /import\s+(\w+)\s+from\s+['"]([^'"]+)['"]\s*;?\s*/g;
-    let match;
-    while ((match = importRegex.exec(module.script)) !== null) {
-      const importedCompName = path.basename(match[2]).toLowerCase();
-      const importedModule = graph.component(importedCompName);
-      if (importedModule) deps.add(importedModule.id);
+    const parsed = parseScript(module.script);
+    if (parsed.ast) {
+      module.imports = parsed.imports;
+      for (const imp of parsed.imports) {
+        const importedCompName = path.basename(imp.source).toLowerCase();
+        const importedModule = graph.component(importedCompName);
+        if (importedModule) deps.add(importedModule.id);
+        // Future: resolve relative importPath against module.sourcePath via path.resolve
+        // and graph.moduleById lookup for JS assets. For now basename match covers components.
+      }
+    } else {
+      // Fallback to regex for scripts that failed to parse (e.g., syntax errors)
+      module.imports = [];
+      const importRegex = /import\s+(\w+)\s+from\s+['"]([^'"]+)['"]\s*;?\s*/g;
+      let match;
+      while ((match = importRegex.exec(module.script)) !== null) {
+        const importedCompName = path.basename(match[2]).toLowerCase();
+        const importedModule = graph.component(importedCompName);
+        if (importedModule) deps.add(importedModule.id);
+      }
     }
+  } else {
+    module.imports = [];
   }
   if (module.template) {
     const frag = parseHTML(module.template).document;
