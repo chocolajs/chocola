@@ -370,20 +370,65 @@ export function processComponentElement(
 
   const topFuncSrc = extractTopLevelFunctions(script || "", RUNTIME_KW);
   const topVars = extractTopLevelVariables(script || "");
-  for (const { name, value } of topVars) {
-    if (name in ctx) continue;
-    if (value !== undefined) {
-      try {
-        ctx[name] = compileExpr(value, false)();
-      } catch {}
+  // Server resolution: evaluate all top-level declarations into ctx for template rendering
+  // Use AST-derived parsed data when available to correctly handle destructuring and comma declarators
+  // Use ctx-aware evaluation so initializers can reference earlier ctx vars (e.g., let a = x + y)
+  const ctxProxyForServer = new Proxy(ctx, { has() { return true; }, get(t,k){ return t[k]; } });
+  if (originalScriptForReach) {
+    const parsedForServer = parseScript(originalScriptForReach);
+    if (parsedForServer.ast) {
+      for (const v of parsedForServer.topVars) {
+        if (v.isDestructuring) {
+          if (v.names.every(n => n in ctx)) continue;
+          if (v.value === undefined) {
+            for (const n of v.names) if (!(n in ctx)) ctx[n] = undefined;
+            continue;
+          }
+          try {
+            const initVal = compileExpr(v.value, true)(ctxProxyForServer);
+            const fnBody = `${v.keyword} ${v.name} = initVal; return {${v.names.join(", ")}};`;
+            const result = new Function("initVal", fnBody)(initVal);
+            for (const n of v.names) if (!(n in ctx)) ctx[n] = result[n];
+          } catch {}
+        } else {
+          const { name, value } = v;
+          if (name in ctx) continue;
+          if (value !== undefined) {
+            try { ctx[name] = compileExpr(value, true)(ctxProxyForServer); } catch {}
+          } else {
+            if (!(name in ctx)) ctx[name] = undefined;
+          }
+        }
+      }
+      for (const src of parsedForServer.topFuncs) {
+        try {
+          const fn = (0, eval)("(" + src + ")");
+          const name = fn.name;
+          if (name && !(name in ctx)) ctx[name] = fn;
+        } catch {}
+      }
+    } else {
+      // Fallback to shim evaluation (ctx-aware for inter-var deps)
+      for (const { name, value } of topVars) {
+        if (name in ctx) continue;
+        if (value !== undefined) {
+          try { ctx[name] = compileExpr(value, true)(ctxProxyForServer); } catch {}
+        }
+      }
+      for (const src of topFuncSrc) {
+        try { const fn = (0, eval)("(" + src + ")"); const name = fn.name; if (name && !(name in ctx)) ctx[name] = fn; } catch {}
+      }
     }
-  }
-  for (const src of topFuncSrc) {
-    try {
-      const fn = (0, eval)("(" + src + ")");
-      const name = fn.name;
-      if (name && !(name in ctx)) ctx[name] = fn;
-    } catch {}
+  } else {
+    for (const { name, value } of topVars) {
+      if (name in ctx) continue;
+      if (value !== undefined) {
+        try { ctx[name] = compileExpr(value, true)(ctxProxyForServer); } catch {}
+      }
+    }
+    for (const src of topFuncSrc) {
+      try { const fn = (0, eval)("(" + src + ")"); const name = fn.name; if (name && !(name in ctx)) ctx[name] = fn; } catch {}
+    }
   }
 
   const elInnerHtml = element.innerHTML;
