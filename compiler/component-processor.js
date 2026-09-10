@@ -3,7 +3,7 @@ import { parseHTML } from "linkedom";
 import { protectCurlyBraces } from "../utils.js";
 import { genRandomId, runtimeFunctionId, throwError, deterministicHash, warnConstantCondition, warnUnusedDeclaration, findElementLine } from "./utils.js";
 import {
-  extractPropsDefaults, extractRuntime, extractTopLevelFunctions, extractTopLevelVariables,
+  extractPropsDefaults, extractRuntime, extractTopLevelFunctions, extractTopLevelVariables, parseScript,
   extractCtxFromEl, hasMountIf, getMountIf,
   reservedAttrs, validateChainStructure, applyConditionalToElement, interpolateNode,
   scopeCss, compileExpr, evaluateConstant,
@@ -260,14 +260,34 @@ export function processComponentElement(
   }
 
   if (script) {
-    const importRegex = /import\s+(\w+)\s+from\s+['"]([^'"]+)['"]\s*;?\s*/g;
-    script = script.replace(importRegex, (_, importedName, importPath) => {
-      const importedCompName = path.basename(importPath).toLowerCase();
-      if (cx.loadedComponents.has(importedCompName)) {
-        generateCSRClass(importedCompName, cx, importedName);
+    const parsed = parseScript(script);
+    if (parsed.ast && parsed.imports.length > 0) {
+      for (const imp of parsed.imports) {
+        const importedCompName = path.basename(imp.source).toLowerCase();
+        if (cx.loadedComponents.has(importedCompName)) {
+          if (imp.specifiers.length === 0) {
+            generateCSRClass(importedCompName, cx);
+          } else {
+            for (const spec of imp.specifiers) {
+              generateCSRClass(importedCompName, cx, spec.local);
+            }
+          }
+        }
       }
-      return "";
-    });
+      const sorted = [...parsed.imports].sort((a, b) => b.start - a.start);
+      for (const imp of sorted) {
+        script = script.slice(0, imp.start) + script.slice(imp.end);
+      }
+    } else if (parsed.parseError) {
+      const importRegex = /import\s+(\w+)\s+from\s+['"]([^'"]+)['"]\s*;?\s*/g;
+      script = script.replace(importRegex, (_, importedName, importPath) => {
+        const importedCompName = path.basename(importPath).toLowerCase();
+        if (cx.loadedComponents.has(importedCompName)) {
+          generateCSRClass(importedCompName, cx, importedName);
+        }
+        return "";
+      });
+    }
   }
 
   const compProps = extractPropsDefaults(script);
@@ -604,15 +624,32 @@ export function processAllComponents(appElements, loadedComponents, pageSourceFi
   );
 
   for (const [compName, instance] of cx.loadedComponents) {
-    const script = instance.match(/<script>([\s\S]*?)<\/script>/i);
-    if (script) {
-      const importRegex = /import\s+(\w+)\s+from\s+['"]([^'"]+)['"]\s*;?\s*/g;
-      let match;
-      while ((match = importRegex.exec(script[1])) !== null) {
-        const importedName = match[1];
-        const importedCompName = path.basename(match[2]).toLowerCase();
-        if (cx.loadedComponents.has(importedCompName)) {
-          generateCSRClass(importedCompName, cx, importedName);
+    const scriptMatch = instance.match(/<script>([\s\S]*?)<\/script>/i);
+    if (scriptMatch) {
+      const scriptContent = scriptMatch[1];
+      const parsed = parseScript(scriptContent);
+      if (parsed.ast) {
+        for (const imp of parsed.imports) {
+          const importedCompName = path.basename(imp.source).toLowerCase();
+          if (cx.loadedComponents.has(importedCompName)) {
+            if (imp.specifiers.length === 0) {
+              generateCSRClass(importedCompName, cx);
+            } else {
+              for (const spec of imp.specifiers) {
+                generateCSRClass(importedCompName, cx, spec.local);
+              }
+            }
+          }
+        }
+      } else {
+        const importRegex = /import\s+(\w+)\s+from\s+['"]([^'"]+)['"]\s*;?\s*/g;
+        let match;
+        while ((match = importRegex.exec(scriptContent)) !== null) {
+          const importedName = match[1];
+          const importedCompName = path.basename(match[2]).toLowerCase();
+          if (cx.loadedComponents.has(importedCompName)) {
+            generateCSRClass(importedCompName, cx, importedName);
+          }
         }
       }
     }

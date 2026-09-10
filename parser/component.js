@@ -1,4 +1,8 @@
-export function extractPropsDefaults(script) {
+import { parseScript } from "./script.js";
+
+// --- Legacy regex-based implementations (fallback) ---
+
+function legacyExtractPropsDefaults(script) {
   if (!script) return [];
   const propsRegex = /export\s+let\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*(?:=\s*([^;]+))?;/g;
   let props = [];
@@ -9,7 +13,7 @@ export function extractPropsDefaults(script) {
   return props;
 }
 
-export function extractRuntime(script, compName) {
+function legacyExtractRuntime(script, compName) {
   const startRegex = /(?:async\s+)?function\s+\$runtime\(([^)]*)\)\s*\{/;
   const match = script.match(startRegex);
   if (!match) return null;
@@ -47,7 +51,7 @@ export function extractRuntime(script, compName) {
   throw new Error(`${compName} $runtime function has unclosed curly braces`);
 }
 
-export function extractTopLevelVariables(script) {
+function legacyExtractTopLevelVariables(script) {
   if (!script) return [];
   const vars = [];
   let i = 0;
@@ -186,7 +190,7 @@ function findDeclaratorEnd(script, start) {
   return i;
 }
 
-export function extractTopLevelFunctions(script, excludeName) {
+function legacyExtractTopLevelFunctions(script, excludeName) {
   const funcs = [];
   let i = 0;
   let depth = 0;
@@ -265,4 +269,72 @@ export function extractTopLevelFunctions(script, excludeName) {
   }
 
   return funcs;
+}
+
+// --- New AST-backed wrappers (Step A) ---
+
+export function extractPropsDefaults(script) {
+  if (!script) return [];
+  const parsed = parseScript(script);
+  if (parsed.ast) {
+    // Use AST-derived props; map to legacy shape
+    return parsed.props.map((p) => ({ name: p.name, defaultValue: p.defaultValue }));
+  }
+  return legacyExtractPropsDefaults(script);
+}
+
+export function extractRuntime(script, compName) {
+  if (!script) return null;
+  const parsed = parseScript(script);
+  if (parsed.ast) {
+    return parsed.runtime;
+  }
+  return legacyExtractRuntime(script, compName);
+}
+
+export function extractTopLevelVariables(script) {
+  if (!script) return [];
+  const parsed = parseScript(script);
+  if (parsed.ast) {
+    const vars = [];
+    for (const v of parsed.topVars) {
+      if (v.isDestructuring) {
+        // Expand destructuring per binding name for back-compat
+        // e.g., const {a,b}=obj -> two entries with same initializer
+        for (const n of v.names) {
+          if (n === "self" || n === "ctx") continue;
+          vars.push({ keyword: v.keyword, name: n, value: v.value });
+        }
+      } else {
+        vars.push({ keyword: v.keyword, name: v.name, value: v.value });
+      }
+    }
+    return vars;
+  }
+  return legacyExtractTopLevelVariables(script);
+}
+
+export function extractTopLevelFunctions(script, excludeName) {
+  if (!script) return [];
+  const parsed = parseScript(script);
+  if (parsed.ast) {
+    if (excludeName === "$runtime") {
+      return parsed.topFuncs;
+    }
+    // Generic exclude
+    const filtered = [];
+    for (const src of parsed.topFuncs) {
+      const m = src.match(/^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/);
+      if (m && m[1] === excludeName) continue;
+      filtered.push(src);
+    }
+    // If excludeName is null/undefined, return all except $runtime handled above
+    // Need to also exclude $runtime if caller passed different name? For safety include all non-excluded
+    if (!excludeName) {
+      // parsed.topFuncs already excludes $runtime, so return as is
+      return parsed.topFuncs;
+    }
+    return filtered;
+  }
+  return legacyExtractTopLevelFunctions(script, excludeName);
 }
