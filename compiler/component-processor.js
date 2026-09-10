@@ -3,7 +3,7 @@ import { parseHTML } from "linkedom";
 import { protectCurlyBraces } from "../utils.js";
 import { genRandomId, runtimeFunctionId, throwError, deterministicHash, warnConstantCondition, warnUnusedDeclaration, findElementLine } from "./utils.js";
 import {
-  extractPropsDefaults, extractRuntime, extractTopLevelFunctions, extractTopLevelVariables, parseScript,
+  extractPropsDefaults, extractRuntime, extractTopLevelFunctions, extractTopLevelVariables, parseScript, computeReachable,
   extractCtxFromEl, hasMountIf, getMountIf,
   reservedAttrs, validateChainStructure, applyConditionalToElement, interpolateNode,
   scopeCss, compileExpr, evaluateConstant,
@@ -94,12 +94,42 @@ function generateCSRClass(compName, cx, explicitClassName) {
   }
 
   let csrRuntimeSource = null;
+  // Compute reachable for client bundling (Step B)
+  const parsedForReach = parseScript(script || "");
+  let reach = null;
+  if (parsedForReach.ast && runtime) {
+    reach = computeReachable(parsedForReach, { bindings: [...bindVarNames] });
+    if (reach.fallback) {
+      // conservative: include all and warn
+      console.warn(chalk.yellow(`WARN ${compName} — dynamic $runtime, including all declarations`));
+    }
+  }
   const injectedNames = new Set(compProps.map(p => p.name));
   for (const varName of bindVarNames) injectedNames.add(varName);
-  const topVarsToInject = topVars.filter(v => !injectedNames.has(v.name));
+  let topVarsToInject = topVars.filter(v => !injectedNames.has(v.name));
+  let propsToInject = compProps;
+  let funcsToInject = topFuncSrc;
+  let bindingsToInject = [...bindVarNames];
+  if (reach && !reach.fallback) {
+    const neededVarNames = new Set(reach.neededVars.flatMap(v => v.names));
+    const neededPropNames = new Set(reach.neededProps.map(p => p.name));
+    const neededFuncNames = new Set(reach.neededFuncs.map(src => {
+      const m = src.match(/^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/);
+      return m ? m[1] : null;
+    }).filter(Boolean));
+    const neededBindingSet = new Set(reach.neededBindings);
+    // Filter to reachable only
+    propsToInject = compProps.filter(p => neededPropNames.has(p.name));
+    topVarsToInject = topVars.filter(v => neededVarNames.has(v.name) && !injectedNames.has(v.name));
+    funcsToInject = topFuncSrc.filter(src => {
+      const m = src.match(/^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/);
+      return m && neededFuncNames.has(m[1]);
+    });
+    bindingsToInject = [...bindVarNames].filter(b => neededBindingSet.has(b));
+  }
   if (runtime) {
     let injectCode = "";
-    for (const { name, defaultValue } of compProps) {
+    for (const { name, defaultValue } of propsToInject) {
       if (defaultValue !== undefined) {
         injectCode += `let ${name} = ctx.${name}??(${defaultValue});\n`;
       } else {
@@ -113,13 +143,13 @@ function generateCSRClass(compName, cx, explicitClassName) {
         injectCode += `${keyword} ${name};\n`;
       }
     }
-    for (const varName of bindVarNames) {
+    for (const varName of bindingsToInject) {
       if (varName !== "self") {
         injectCode += `let ${varName} = ctx.${varName};\n`;
       }
     }
-    if (topFuncSrc.length > 0) {
-      injectCode += "\n" + topFuncSrc.join("\n\n") + "\n";
+    if (funcsToInject.length > 0) {
+      injectCode += "\n" + funcsToInject.join("\n\n") + "\n";
     }
     runtime = runtime.replace(/\$runtime\([^)]*\)\s*\{/, match => match + "\n" + injectCode);
     runtime = runtime.replace(`${RUNTIME_KW}()`, `function(self, ctx)`);
@@ -128,10 +158,17 @@ function generateCSRClass(compName, cx, explicitClassName) {
 
   const className = explicitClassName || compName.replace(".html", "").replace(/^\w/, c => c.toUpperCase());
   const propsParts = [];
-  for (const { name, defaultValue } of compProps) {
+  // For CSR class props: when runtime exists, include only reachable; otherwise keep all (fallback for CSR-only)
+  let propsForClass = compProps;
+  let varsForClass = topVarsToInject;
+  if (runtime && reach && !reach.fallback) {
+    propsForClass = propsToInject;
+    varsForClass = topVarsToInject;
+  }
+  for (const { name, defaultValue } of propsForClass) {
     propsParts.push(`${JSON.stringify(name)}: ${defaultValue !== undefined ? defaultValue : "null"}`);
   }
-  for (const { name, value } of topVarsToInject) {
+  for (const { name, value } of varsForClass) {
     if (value !== undefined) {
       propsParts.push(`${JSON.stringify(name)}: ${value}`);
     }
@@ -259,10 +296,24 @@ export function processComponentElement(
     return false;
   }
 
+  // Store original script for reachability (before stripping)
+  const originalScriptForReach = script;
   if (script) {
     const parsed = parseScript(script);
     if (parsed.ast && parsed.imports.length > 0) {
-      for (const imp of parsed.imports) {
+      // Determine needed imports via reachability (Step B)
+      let importsToGenerate = parsed.imports;
+      if (parsed.runtimeNode) {
+        const reachForImports = computeReachable(parsed, { bindings: [] });
+        if (!reachForImports.fallback) {
+          const neededSet = new Set(reachForImports.neededImports);
+          importsToGenerate = parsed.imports.filter(imp => neededSet.has(imp));
+        }
+      } else {
+        // No runtime -> no client imports needed (server-only)
+        importsToGenerate = [];
+      }
+      for (const imp of importsToGenerate) {
         const importedCompName = path.basename(imp.source).toLowerCase();
         if (cx.loadedComponents.has(importedCompName)) {
           if (imp.specifiers.length === 0) {
@@ -558,25 +609,106 @@ export function processComponentElement(
         let fnId;
         if (!fnEntry) {
           fnId = runtimeFunctionId(compName);
-          const topFuncs = topFuncSrc;
+          // Step B: filter to client-reachable declarations
+          let reachInject = null;
+          if (originalScriptForReach) {
+            const parsedReach = parseScript(originalScriptForReach);
+            if (parsedReach.ast) {
+              const bindNames = bindings.map(b => b.varName);
+              reachInject = computeReachable(parsedReach, { bindings: bindNames });
+              if (reachInject.fallback) {
+                console.warn(chalk.yellow(`WARN ${compName} — dynamic $runtime, including all declarations`));
+                reachInject = null;
+              }
+            }
+          }
+          // Prepare filtered sets
+          let compPropsToInject = compProps;
+          let topVarsToInject = topVars;
+          let bindingsToInject = bindings;
+          let topFuncsToInject = topFuncSrc;
+          if (reachInject) {
+            const neededPropNames = new Set(reachInject.neededProps.map(p => p.name));
+            const neededVarNames = new Set(reachInject.neededVars.flatMap(v => v.names));
+            const neededBindingSet = new Set(reachInject.neededBindings);
+            const neededFuncNames = new Set(reachInject.neededFuncs.map(src => {
+              const m = src.match(/^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/);
+              return m ? m[1] : null;
+            }).filter(Boolean));
+            // Rebuild ctxDef filtered to needed props (inject only reachable props)
+            // Note: declared handling below will be updated to use filtered props
+            compPropsToInject = compProps.filter(p => neededPropNames.has(p.name));
+            topVarsToInject = topVars.filter(v => neededVarNames.has(v.name));
+            bindingsToInject = bindings.filter(b => neededBindingSet.has(b.varName));
+            topFuncsToInject = topFuncSrc.filter(src => {
+              const m = src.match(/^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/);
+              return m && neededFuncNames.has(m[1]);
+            });
+            // Rebuild ctxDef to only include reachable props
+            // declared already has runtimeCtx keys; now add only needed props
+            // Recreate ctxDef parts filtered
+            const ctxDefPartsFiltered = [];
+            const declaredForCtx = new Set(Object.keys(runtimeCtx));
+            for (const { name, defaultValue } of compPropsToInject) {
+              if (declaredForCtx.has(name)) continue;
+              if (defaultValue !== undefined) {
+                ctxDefPartsFiltered.push(`let ${name} = ctx.${name}??(${defaultValue});\n`);
+              } else {
+                ctxDefPartsFiltered.push(`let ${name} = ctx.${name};\n`);
+              }
+              declaredForCtx.add(name);
+            }
+            // Prepend runtimeCtx parts (already in ctxDefParts) but we need to reconstruct
+            // Simpler: rebuild ctxDef from scratch filtered
+            const runtimeCtxParts = [];
+            for (const [k,v] of Object.entries(runtimeCtx)) {
+              runtimeCtxParts.push(`let ${k} = ctx.${k}??${JSON.stringify(v)};\n`);
+            }
+            const filteredCtxDef = runtimeCtxParts.join("") + ctxDefPartsFiltered.join("");
+            // Use filtered ctxDef for injection
+            // declared set for topVars should include runtimeCtx + needed props + bindingsToInject
+            // We'll set injectCode later using filteredCtxDef
+            // Override ctxDef and declared handling
+            // Store for later use
+            reachInject._filteredCtxDef = filteredCtxDef;
+            reachInject._compPropsToInject = compPropsToInject;
+            reachInject._topVarsToInject = topVarsToInject;
+            reachInject._bindingsToInject = bindingsToInject;
+            reachInject._topFuncsToInject = topFuncsToInject;
+          }
 
-          let injectCode = ctxDef;
-          for (const b of bindings) declared.add(b.varName);
-          const undeclaredTopVars = topVars.filter(v => !declared.has(v.name));
-          if (undeclaredTopVars.length > 0) {
-            injectCode += "\n" + undeclaredTopVars.map(v => v.value !== undefined
+          let injectCode;
+          let effectiveTopVars;
+          let effectiveBindings;
+          let effectiveFuncs;
+          if (reachInject && reachInject._filteredCtxDef !== undefined) {
+            injectCode = reachInject._filteredCtxDef;
+            // declared for topVars filtering should include runtimeCtx + needed props + needed bindings
+            const filteredDeclared = new Set([...Object.keys(runtimeCtx), ...reachInject._compPropsToInject.map(p=>p.name), ...reachInject._bindingsToInject.map(b=>b.varName)]);
+            effectiveTopVars = reachInject._topVarsToInject.filter(v => !filteredDeclared.has(v.name));
+            effectiveBindings = reachInject._bindingsToInject;
+            effectiveFuncs = reachInject._topFuncsToInject;
+          } else {
+            injectCode = ctxDef;
+            for (const b of bindings) declared.add(b.varName);
+            effectiveTopVars = topVars.filter(v => !declared.has(v.name));
+            effectiveBindings = bindings;
+            effectiveFuncs = topFuncSrc;
+          }
+          if (effectiveTopVars.length > 0) {
+            injectCode += "\n" + effectiveTopVars.map(v => v.value !== undefined
               ? `${v.keyword} ${v.name} = ctx.${v.name}??(${v.value});`
               : `${v.keyword} ${v.name};`
             ).join("\n") + "\n";
           }
-          if (bindings.length > 0) {
-            injectCode += "\n" + bindings.map(b => {
+          if (effectiveBindings.length > 0) {
+            injectCode += "\n" + effectiveBindings.map(b => {
               const accessor = b.prop === "self" ? "" : "." + b.prop;
               return "let " + b.varName + " = self.querySelector('[data-chbind-" + b.bindId + "]')" + accessor + ";";
             }).join("\n") + "\n";
           }
-          if (topFuncs.length > 0) {
-            injectCode += "\n" + topFuncs.join("\n\n") + "\n";
+          if (effectiveFuncs.length > 0) {
+            injectCode += "\n" + effectiveFuncs.join("\n\n") + "\n";
           }
           runtime = runtime.replace(/\$runtime\([^)]*\)\s*\{/, match => match + "\n" + injectCode);
 
@@ -629,7 +761,17 @@ export function processAllComponents(appElements, loadedComponents, pageSourceFi
       const scriptContent = scriptMatch[1];
       const parsed = parseScript(scriptContent);
       if (parsed.ast) {
-        for (const imp of parsed.imports) {
+        let importsToGenerate = parsed.imports;
+        if (parsed.runtimeNode) {
+          const reach = computeReachable(parsed, { bindings: [] });
+          if (!reach.fallback) {
+            const neededSet = new Set(reach.neededImports);
+            importsToGenerate = parsed.imports.filter(imp => neededSet.has(imp));
+          }
+        } else {
+          importsToGenerate = [];
+        }
+        for (const imp of importsToGenerate) {
           const importedCompName = path.basename(imp.source).toLowerCase();
           if (cx.loadedComponents.has(importedCompName)) {
             if (imp.specifiers.length === 0) {

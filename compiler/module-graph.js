@@ -8,7 +8,7 @@ import { protectCurlyBraces } from "../utils.js";
 import { deterministicHash, runtimeFunctionId } from "./utils.js";
 import { createDOM, getAssetLinks, getScriptElements } from "./dom-processor.js";
 import {
-  extractPropsDefaults, extractTopLevelFunctions, extractTopLevelVariables, parseScript,
+  extractPropsDefaults, extractTopLevelFunctions, extractTopLevelVariables, parseScript, computeReachable,
 } from "../parser/index.js";
 
 const RUNTIME_KW = "$runtime";
@@ -31,6 +31,7 @@ export class ChocolaModule {
     this.topFuncs = [];
     this.topVars = [];
     this.imports = [];
+    this.neededClientImports = [];
     this.cssId = null;
     this.fnId = null;
   }
@@ -95,16 +96,30 @@ function compileComponentModule(module, graph) {
     const parsed = parseScript(module.script);
     if (parsed.ast) {
       module.imports = parsed.imports;
-      for (const imp of parsed.imports) {
+      let importsForDeps = parsed.imports;
+      if (parsed.runtimeNode) {
+        const reach = computeReachable(parsed, { bindings: [] });
+        if (!reach.fallback) {
+          const neededSet = new Set(reach.neededImports);
+          importsForDeps = parsed.imports.filter(imp => neededSet.has(imp));
+        }
+        module.neededClientImports = importsForDeps;
+      } else {
+        importsForDeps = [];
+        module.neededClientImports = [];
+      }
+      for (const imp of importsForDeps) {
         const importedCompName = path.basename(imp.source).toLowerCase();
         const importedModule = graph.component(importedCompName);
         if (importedModule) deps.add(importedModule.id);
-        // Future: resolve relative importPath against module.sourcePath via path.resolve
-        // and graph.moduleById lookup for JS assets. For now basename match covers components.
       }
+      // Template deps added below will cover component usage in template even when
+      // script import is not client-reachable (server-only).
+      // Keep full import list in module.imports for reference.
     } else {
       // Fallback to regex for scripts that failed to parse (e.g., syntax errors)
       module.imports = [];
+      module.neededClientImports = [];
       const importRegex = /import\s+(\w+)\s+from\s+['"]([^'"]+)['"]\s*;?\s*/g;
       let match;
       while ((match = importRegex.exec(module.script)) !== null) {
@@ -115,6 +130,7 @@ function compileComponentModule(module, graph) {
     }
   } else {
     module.imports = [];
+    module.neededClientImports = [];
   }
   if (module.template) {
     const frag = parseHTML(module.template).document;
