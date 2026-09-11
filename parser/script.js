@@ -409,11 +409,11 @@ export function computeReachable(parsed, options = {}) {
 
   for (const id of runtimeIds) {
     if (GLOBALS.has(id)) continue;
-    if (varMap.has(id)) { if (!neededVarNames.has(id)) { neededVarNames.add(id); worklist.push(id); } }
+    if (bindingSet.has(id)) { neededBindingNames.add(id); }
+    else if (varMap.has(id)) { if (!neededVarNames.has(id)) { neededVarNames.add(id); worklist.push(id); } }
     else if (funcMap.has(id)) { if (!neededFuncNames.has(id)) { neededFuncNames.add(id); worklist.push(id); } }
     else if (propMap.has(id)) { if (!neededPropNames.has(id)) { neededPropNames.add(id); worklist.push(id); } }
     else if (importMap.has(id)) { if (!neededImportLocals.has(id)) { neededImportLocals.add(id); worklist.push(id); } }
-    else if (bindingSet.has(id)) { neededBindingNames.add(id); }
   }
 
   // BFS transitive
