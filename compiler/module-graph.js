@@ -97,12 +97,17 @@ function compileComponentModule(module, graph) {
     if (parsed.ast) {
       module.imports = parsed.imports;
       let importsForDeps = parsed.imports;
-      if (parsed.runtimeNode) {
+      const treeShake = graph.config.treeShakeRuntime !== false;
+      if (treeShake && parsed.runtimeNode) {
         const reach = computeReachable(parsed, { bindings: [] });
         if (!reach.fallback) {
           const neededSet = new Set(reach.neededImports);
           importsForDeps = parsed.imports.filter(imp => neededSet.has(imp));
         }
+        module.neededClientImports = importsForDeps;
+      } else if (!treeShake) {
+        // Feature flag disabled: include all imports for deps
+        importsForDeps = parsed.imports;
         module.neededClientImports = importsForDeps;
       } else {
         importsForDeps = [];

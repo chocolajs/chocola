@@ -154,7 +154,8 @@ export async function renderPage(graph, ctx = {}) {
     graph.loadedComponents,
     page.sourcePath,
     page.source,
-    ctx
+    ctx,
+    graph.config.treeShakeRuntime
   );
 
   const csrSource = await fs.readFile(new URL("../runtime/index.js", import.meta.url), "utf-8");

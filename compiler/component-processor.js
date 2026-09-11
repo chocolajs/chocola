@@ -13,7 +13,7 @@ import chalk from "./chalk.js";
 
 
 class ProcessContext {
-  constructor(loadedComponents, runtimeChunks, compIdColl, runtimeMap, cssScopes, cssScopesMap, scopedStyles, staticCtxRegistry, csrClasses) {
+  constructor(loadedComponents, runtimeChunks, compIdColl, runtimeMap, cssScopes, cssScopesMap, scopedStyles, staticCtxRegistry, csrClasses, treeShakeRuntime = true) {
     this.loadedComponents = loadedComponents;
     this.runtimeChunks = runtimeChunks;
     this.compIdColl = compIdColl;
@@ -24,6 +24,7 @@ class ProcessContext {
     this.staticCtxRegistry = staticCtxRegistry;
     this.csrClasses = csrClasses;
     this.unusedWarned = new Set();
+    this.treeShakeRuntime = treeShakeRuntime !== false;
   }
 }
 
@@ -94,10 +95,10 @@ function generateCSRClass(compName, cx, explicitClassName) {
   }
 
   let csrRuntimeSource = null;
-  // Compute reachable for client bundling (Step B)
+  // Compute reachable for client bundling (Step B) - Feature flag: treeShakeRuntime
   const parsedForReach = parseScript(script || "");
   let reach = null;
-  if (parsedForReach.ast && runtime) {
+  if (cx.treeShakeRuntime !== false && parsedForReach.ast && runtime) {
     reach = computeReachable(parsedForReach, { bindings: [...bindVarNames] });
     if (reach.fallback) {
       // conservative: include all and warn
@@ -110,7 +111,7 @@ function generateCSRClass(compName, cx, explicitClassName) {
   let propsToInject = compProps;
   let funcsToInject = topFuncSrc;
   let bindingsToInject = [...bindVarNames];
-  if (reach && !reach.fallback) {
+  if (cx.treeShakeRuntime !== false && reach && !reach.fallback) {
     const neededVarNames = new Set(reach.neededVars.flatMap(v => v.names));
     const neededPropNames = new Set(reach.neededProps.map(p => p.name));
     const neededFuncNames = new Set(reach.neededFuncs.map(src => {
@@ -161,7 +162,7 @@ function generateCSRClass(compName, cx, explicitClassName) {
   // For CSR class props: when runtime exists, include only reachable; otherwise keep all (fallback for CSR-only)
   let propsForClass = compProps;
   let varsForClass = topVarsToInject;
-  if (runtime && reach && !reach.fallback) {
+  if (cx.treeShakeRuntime !== false && runtime && reach && !reach.fallback) {
     propsForClass = propsToInject;
     varsForClass = topVarsToInject;
   }
@@ -301,9 +302,11 @@ export function processComponentElement(
   if (script) {
     const parsed = parseScript(script);
     if (parsed.ast && parsed.imports.length > 0) {
-      // Determine needed imports via reachability (Step B)
+      // Determine needed imports via reachability (Step B) - Feature flag
       let importsToGenerate = parsed.imports;
-      if (parsed.runtimeNode) {
+      if (cx.treeShakeRuntime === false) {
+        // keep all imports when tree-shaking disabled
+      } else if (parsed.runtimeNode) {
         const reachForImports = computeReachable(parsed, { bindings: [] });
         if (!reachForImports.fallback) {
           const neededSet = new Set(reachForImports.neededImports);
@@ -659,9 +662,9 @@ export function processComponentElement(
         let fnId;
         if (!fnEntry) {
           fnId = runtimeFunctionId(compName);
-          // Step B: filter to client-reachable declarations
+          // Step B: filter to client-reachable declarations - Feature flag
           let reachInject = null;
-          if (originalScriptForReach) {
+          if (cx.treeShakeRuntime !== false && originalScriptForReach) {
             const parsedReach = parseScript(originalScriptForReach);
             if (parsedReach.ast) {
               const bindNames = bindings.map(b => b.varName);
@@ -800,9 +803,9 @@ export function processComponentElement(
   return firstChild && firstChild.nodeType === 1 ? firstChild : true;
 }
 
-export function processAllComponents(appElements, loadedComponents, pageSourceFile, pageSourceContent, globalCtx = {}) {
+export function processAllComponents(appElements, loadedComponents, pageSourceFile, pageSourceContent, globalCtx = {}, treeShakeRuntime = true) {
   const cx = new ProcessContext(
-    loadedComponents, [], [], new Map(), [], new Map(), [], new Map(), new Map()
+    loadedComponents, [], [], new Map(), [], new Map(), [], new Map(), new Map(), treeShakeRuntime
   );
 
   for (const [compName, instance] of cx.loadedComponents) {
@@ -812,7 +815,9 @@ export function processAllComponents(appElements, loadedComponents, pageSourceFi
       const parsed = parseScript(scriptContent);
       if (parsed.ast) {
         let importsToGenerate = parsed.imports;
-        if (parsed.runtimeNode) {
+        if (cx.treeShakeRuntime === false) {
+          // keep all when disabled
+        } else if (parsed.runtimeNode) {
           const reach = computeReachable(parsed, { bindings: [] });
           if (!reach.fallback) {
             const neededSet = new Set(reach.neededImports);
