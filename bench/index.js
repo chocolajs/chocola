@@ -273,6 +273,52 @@ async function benchStableIds() {
   showTable("stable-id", ["measure", "value"], rows, ["measure", "value"], rows);
 }
 
+async function benchRuntimeSize() {
+  console.log("\n== runtime size (tree-shaking) ==");
+  // Synthetic 100 components, each with 2 unused helpers to measure payload reduction
+  const { buildModuleGraph, renderPage } = await import("../compiler/index.js");
+  const { makeTempApp } = await import("./fixtures.js");
+  const { root, cleanup } = await makeTempApp(async (root) => {
+    const libDir = path.join(root, "src", "lib");
+    await fs.mkdir(libDir, { recursive: true });
+    await fs.writeFile(path.join(root, "chocola.config.json"), JSON.stringify({ bundle: { srcDir: "src", outDir: "dist" } }, null, 2));
+    for (let i = 0; i < 100; i++) {
+      const src = `<script>
+  let a${i} = 1;
+  let b${i} = 2;
+  function h1_${i}(){ return a${i}; }
+  function h2_${i}(){ return b${i}; }
+  function $runtime(){ h2_${i}(); }
+</script>
+<template><div>{b${i}}</div></template>
+`;
+      await fs.writeFile(path.join(libDir, `c${i}.html`), src);
+    }
+    const body = Array.from({length: 100}, (_,i)=> `<c${i}></c${i}>`).join("\n    ");
+    const index = `<!DOCTYPE html><html><head><meta charset="UTF-8"/></head><body><app>${body}</app></body></html>`;
+    await fs.writeFile(path.join(root, "src", "index.html"), index);
+  });
+  try {
+    const graph = await buildModuleGraph(root);
+    const result = await renderPage(graph);
+    const runtimeFiles = result.files.filter(f => f.path.startsWith("run-"));
+    const len = runtimeFiles.reduce((sum, f) => sum + f.content.length, 0);
+    const hasA = runtimeFiles.some(f => f.content.includes("let a0"));
+    const hasH1 = runtimeFiles.some(f => f.content.includes("h1_0"));
+    console.log(`runtimeScript.length: ${len} bytes (${(len/1024).toFixed(1)} KB)`);
+    console.log(`contains unused a0/h1_0: ${hasA}/${hasH1} (should be false/false)`);
+    const rows = [
+      ["components", "100"],
+      ["runtimeScript (bytes)", String(len)],
+      ["runtimeScript (KB)", (len/1024).toFixed(1)],
+      ["unused helpers dropped", (!hasA && !hasH1) ? "yes" : "no"],
+    ];
+    showTable("runtime-size", ["metric", "value"], rows, ["metric", "value"], rows);
+  } finally {
+    await cleanup();
+  }
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const csvMode = args.includes("--csv") ? true : args.includes("--no-csv") ? false : null;
@@ -291,6 +337,7 @@ async function main() {
   await benchColdBuild();
   await benchScaling();
   await benchStableIds();
+  await benchRuntimeSize();
 
   let exportCsv = csvMode;
   if (exportCsv === null && stdin.isTTY) {
