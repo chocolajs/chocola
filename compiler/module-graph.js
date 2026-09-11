@@ -109,6 +109,12 @@ function compileComponentModule(module, graph) {
         module.neededClientImports = [];
       }
       for (const imp of importsForDeps) {
+        const isComponent = imp.source.toLowerCase().endsWith(".html");
+        if (!isComponent) {
+          // Phase 1: JS imports that are client-reachable are warned in component-processor (render-time)
+          // to avoid duplicate warnings at graph build time. Silently skip for deps.
+          continue;
+        }
         const importedCompName = path.basename(imp.source).toLowerCase();
         const importedModule = graph.component(importedCompName);
         if (importedModule) deps.add(importedModule.id);

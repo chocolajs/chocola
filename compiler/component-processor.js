@@ -314,6 +314,11 @@ export function processComponentElement(
         importsToGenerate = [];
       }
       for (const imp of importsToGenerate) {
+        const isComponent = imp.source.toLowerCase().endsWith(".html");
+        if (!isComponent) {
+          console.warn(chalk.yellow(`WARN ${compName} — JS import "${imp.source}" is client-reachable but not bundled (Phase 1: dropping)`));
+          continue;
+        }
         const importedCompName = path.basename(imp.source).toLowerCase();
         if (cx.loadedComponents.has(importedCompName)) {
           if (imp.specifiers.length === 0) {
@@ -817,6 +822,8 @@ export function processAllComponents(appElements, loadedComponents, pageSourceFi
           importsToGenerate = [];
         }
         for (const imp of importsToGenerate) {
+          const isComponent = imp.source.toLowerCase().endsWith(".html");
+          if (!isComponent) continue;
           const importedCompName = path.basename(imp.source).toLowerCase();
           if (cx.loadedComponents.has(importedCompName)) {
             if (imp.specifiers.length === 0) {
