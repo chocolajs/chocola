@@ -4,11 +4,12 @@ import path from "path";
 import chalk from "../compiler/chalk.js";
 import compile from "../compiler/index.js";
 import { loadConfig, resolvePaths } from "../compiler/config.js";
-import { getConfig } from "../utils.js";
+import { getConfig, isMissingConfigFile, queueConfigWarning } from "../utils.js";
+
+const warnedDevHostname = new Set();
+const warnedDevPort = new Set();
 
 export async function serve(__rootdir) {
-  await compile(__rootdir);
-
   let __outdir = "dist";
   let __config = {
     hostname: "localhost",
@@ -20,13 +21,25 @@ export async function serve(__rootdir) {
   const fullConfig = await getConfig(__rootdir);
   const config = await loadConfig(__rootdir);
   const paths = resolvePaths(__rootdir, config);
-  const devConfig = fullConfig.dev;
 
-  if (devConfig.hostname) { __config.hostname = devConfig.hostname }
-  else { console.warn(chalk.bold.yellow("WARNING!"), `hostname not defined in chocola.config.json file: using default ${__config.hostname} hostname.`) }
+  if (isMissingConfigFile(fullConfig)) {
+    // top-level already warned; use defaults silently
+  } else if (fullConfig.dev != null) {
+    const devConfig = fullConfig.dev;
+    if (devConfig.hostname) { __config.hostname = devConfig.hostname }
+    else if (!warnedDevHostname.has(__rootdir)) {
+      warnedDevHostname.add(__rootdir);
+      queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), `dev.hostname not defined in chocola.config.json file: using default ${__config.hostname} dev.hostname.`);
+    }
 
-  if (devConfig.port) { __config.port = devConfig.port }
-  else { console.warn(chalk.bold.yellow("WARNING!"), `port not defined in chocola.config.json file: using default ${__config.port} port.`) }
+    if (devConfig.port) { __config.port = devConfig.port }
+    else if (!warnedDevPort.has(__rootdir)) {
+      warnedDevPort.add(__rootdir);
+      queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), `dev.port not defined in chocola.config.json file: using default ${__config.port} dev.port.`);
+    }
+  }
+
+  await compile(__rootdir);
 
   const srcDir = paths.src;
 
