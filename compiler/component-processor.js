@@ -139,7 +139,7 @@ function generateCSRClass(compName, cx, explicitClassName) {
     }
     for (const { keyword, name, value } of topVarsToInject) {
       if (value !== undefined) {
-        injectCode += `${keyword} ${name} = ctx.${name}??(${value});\n`;
+        injectCode += `${keyword} ${name} = ${value};\n`;
       } else {
         injectCode += `${keyword} ${name};\n`;
       }
@@ -161,18 +161,11 @@ function generateCSRClass(compName, cx, explicitClassName) {
   const propsParts = [];
   // For CSR class props: when runtime exists, include only reachable; otherwise keep all (fallback for CSR-only)
   let propsForClass = compProps;
-  let varsForClass = topVarsToInject;
   if (cx.treeShakeRuntime !== false && runtime && reach && !reach.fallback) {
     propsForClass = propsToInject;
-    varsForClass = topVarsToInject;
   }
   for (const { name, defaultValue } of propsForClass) {
     propsParts.push(`${JSON.stringify(name)}: ${defaultValue !== undefined ? defaultValue : "null"}`);
-  }
-  for (const { name, value } of varsForClass) {
-    if (value !== undefined) {
-      propsParts.push(`${JSON.stringify(name)}: ${value}`);
-    }
   }
 
   const childrenPart = childMappings.length > 0
@@ -254,7 +247,7 @@ function warnUnusedDeclarations(cx, compName, instance, script, fragment) {
     if (isUnused(name)) warn("prop", name, new RegExp("export\\s+let\\s+" + escapeNameForRegex(name) + "\\b"));
   }
   for (const name of topVars) {
-    if (isUnused(name)) warn("variable", name, new RegExp("(?:^|[^\\w])(?:let|const)\\s+" + escapeNameForRegex(name) + "\\b"));
+    if (isUnused(name)) warn("variable", name, new RegExp("(?:^|[^\\w])(?:let|const|var)\\s+" + escapeNameForRegex(name) + "\\b"));
   }
   for (const name of topFuncs) {
     if (isUnused(name)) warn("function", name, new RegExp("(?:async\\s+)?function\\s+" + escapeNameForRegex(name) + "\\b"));
@@ -750,7 +743,7 @@ export function processComponentElement(
           }
           if (effectiveTopVars.length > 0) {
             injectCode += "\n" + effectiveTopVars.map(v => v.value !== undefined
-              ? `${v.keyword} ${v.name} = ctx.${v.name}??(${v.value});`
+              ? `${v.keyword} ${v.name} = ${v.value};`
               : `${v.keyword} ${v.name};`
             ).join("\n") + "\n";
           }

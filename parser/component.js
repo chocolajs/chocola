@@ -98,7 +98,7 @@ function legacyExtractTopLevelVariables(script) {
 
     if (depth === 0 && parenDepth === 0 && bracketDepth === 0) {
       const rest = script.slice(i);
-      const m = rest.match(/^(let|const)\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*/);
+      const m = rest.match(/^(let|const|var)\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*/);
       if (m) {
         const keyword = m[1];
         const before = script.slice(0, i).trimEnd();
