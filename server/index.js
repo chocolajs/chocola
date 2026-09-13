@@ -5,10 +5,14 @@ import { createHash } from "crypto";
 import zlib from "zlib";
 import { pathToFileURL } from "url";
 
+import chalk from "../compiler/chalk.js";
 import { buildModuleGraph } from "../compiler/module-graph.js";
 import { renderPage } from "../compiler/render.js";
 import { loadConfig, resolvePaths } from "../compiler/config.js";
-import { getConfig } from "../utils.js";
+import { getConfig, isMissingConfigFile, queueConfigWarning, flushConfigWarnings } from "../utils.js";
+
+const warnedServerPort = new Set();
+const warnedServerHostname = new Set();
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -183,7 +187,7 @@ function normalizeRootDir(arg, opts) {
 export async function createHandler(rootDirArg, optsArg) {
   const { rootDir, opts } = normalizeRootDir(rootDirArg, optsArg);
 
-  const fullConfig = await getConfig(rootDir).catch(() => ({}));
+  const fullConfig = await getConfig(rootDir);
   const config = await loadConfig(rootDir);
   const paths = resolvePaths(rootDir, config);
 
@@ -365,6 +369,9 @@ export async function createHandler(rootDirArg, optsArg) {
     }
   }
 
+  // Flush config warnings before returning handler so they appear before any subsequent logs
+  flushConfigWarnings(rootDir);
+
   // Attach helpers for testing / introspection
   handler.graph = graph;
   handler.virtualFiles = virtualFiles;
@@ -380,12 +387,27 @@ export const createServerRenderer = createHandler; // future ssr escape hatch al
 
 export async function serve(rootDirArg, optsArg) {
   const { rootDir } = normalizeRootDir(rootDirArg, optsArg);
-  const fullConfig = await getConfig(rootDir).catch(() => ({}));
+  const fullConfig = await getConfig(rootDir);
   const serverCfg = fullConfig.server || {};
   const port = serverCfg.port ?? optsArg?.port ?? 8080;
   const hostname = serverCfg.hostname ?? serverCfg.host ?? optsArg?.hostname ?? optsArg?.host ?? "localhost";
 
+  if (isMissingConfigFile(fullConfig)) {
+    // top-level already warned
+  } else if (fullConfig.server != null) {
+    if (serverCfg.port == null && optsArg?.port == null && !warnedServerPort.has(rootDir)) {
+      warnedServerPort.add(rootDir);
+      queueConfigWarning(rootDir, chalk.bold.yellow("WARNING!"), `server.port not defined in chocola.config.json file: using default ${port} server.port.`);
+    }
+    if ((serverCfg.hostname == null && serverCfg.host == null) && (optsArg?.hostname == null && optsArg?.host == null) && !warnedServerHostname.has(rootDir)) {
+      warnedServerHostname.add(rootDir);
+      queueConfigWarning(rootDir, chalk.bold.yellow("WARNING!"), `server.hostname not defined in chocola.config.json file: using default ${hostname} server.hostname.`);
+    }
+  }
+
   const handler = await createHandler(rootDir, optsArg);
+
+  flushConfigWarnings(rootDir);
 
   const server = http.createServer(handler);
   await new Promise((resolve, reject) => {

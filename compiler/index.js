@@ -5,6 +5,7 @@ import chalk from "./chalk.js";
 import { buildModuleGraph } from "./module-graph.js";
 import { renderPage } from "./render.js";
 import { writeHTMLOutput } from "./dom-processor.js";
+import { flushConfigWarnings } from "../utils.js";
 
 export { buildModuleGraph } from "./module-graph.js";
 export { renderPage } from "./render.js";
@@ -98,8 +99,14 @@ export default async function compile(rootDir, buildConfig) {
 
   const durationMs = performance.now() - startTime;
 
-  !isHotReload && logSuccess(graph.paths.outDir, durationMs);
-  isHotReload && console.log("Dev server updated " + chalk.hex(TEXT_FAINT)(`(${formatDuration(durationMs)})`));
+  if (!isHotReload) {
+    flushConfigWarnings(rootDir);
+    logSuccess(graph.paths.outDir, durationMs);
+  }
+  if (isHotReload) {
+    flushConfigWarnings(rootDir);
+    console.log("Dev server updated " + chalk.hex(TEXT_FAINT)(`(${formatDuration(durationMs)})`));
+  }
 }
 
 /**
