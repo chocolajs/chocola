@@ -7,6 +7,7 @@ export async function getComponents(libDir) {
   try {
     let componentsLib = [];
     let loadedComponents = new Map();
+    let originalNames = new Map();
     let emptyComps = [];
 
     const components = await fs.readdir(libDir);
@@ -25,6 +26,7 @@ export async function getComponents(libDir) {
           if (instance === "" || instance.trim().length === 0) emptyComps.push(comp);
 
           loadedComponents.set(comp.toLowerCase(), instance);
+          originalNames.set(comp.toLowerCase(), comp);
           componentsLib.push(comp);
         } catch (err) {
           throwError(`Failed to load component "${comp}": ${err.message || err}`);
@@ -33,7 +35,7 @@ export async function getComponents(libDir) {
 
     await Promise.all(reads);
 
-    return { componentsLib, loadedComponents, emptyComps };
+    return { componentsLib, loadedComponents, originalNames, emptyComps };
   } catch (err) {
     throwError(`Failed to load components from ${libDir}: ${err.message}`);
   }
