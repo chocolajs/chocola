@@ -45,6 +45,7 @@ export class ModuleGraph {
     this.modules = new Map();
     this.components = new Map();
     this.loadedComponents = new Map();
+    this.originalComponentNames = new Map();
     this.page = null;
   }
 
@@ -213,7 +214,7 @@ export async function buildModuleGraph(rootDir) {
   graph.page = pageModule;
 
   const foundComponents = await getComponents(paths.components);
-  const { loadedComponents, componentsLib, emptyComps } = foundComponents;
+  const { loadedComponents, originalNames, componentsLib, emptyComps } = foundComponents;
 
   console.log(chalk.bold.green(">"), "Components found in", chalk.green.underline(paths.components) + ":");
   console.log("   ", componentsLib, "\n\n");
@@ -237,6 +238,9 @@ export async function buildModuleGraph(rootDir) {
     });
     graph.addModule(module);
   }
+
+  // Track original filename casing for log display (fallback to lowercase tag)
+  graph.originalComponentNames = originalNames;
 
   for (const module of graph.modules.values()) {
     if (module.kind === "component") compileComponentModule(module, graph);

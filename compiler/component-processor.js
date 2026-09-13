@@ -13,7 +13,7 @@ import chalk from "./chalk.js";
 
 
 class ProcessContext {
-  constructor(loadedComponents, runtimeChunks, compIdColl, runtimeMap, cssScopes, cssScopesMap, scopedStyles, staticCtxRegistry, csrClasses, treeShakeRuntime = true) {
+  constructor(loadedComponents, runtimeChunks, compIdColl, runtimeMap, cssScopes, cssScopesMap, scopedStyles, staticCtxRegistry, csrClasses, treeShakeRuntime = true, originalNames = null) {
     this.loadedComponents = loadedComponents;
     this.runtimeChunks = runtimeChunks;
     this.compIdColl = compIdColl;
@@ -25,7 +25,16 @@ class ProcessContext {
     this.csrClasses = csrClasses;
     this.unusedWarned = new Set();
     this.treeShakeRuntime = treeShakeRuntime !== false;
+    this.originalNames = originalNames || new Map();
   }
+}
+
+function resolveDisplayName(compName, cx) {
+  if (!compName) return compName;
+  if (cx?.originalNames?.has(compName)) return cx.originalNames.get(compName);
+  const lower = compName.toLowerCase();
+  if (cx?.originalNames?.has(lower)) return cx.originalNames.get(lower);
+  return compName;
 }
 
 function escapeForTemplateLiteral(str) {
@@ -46,6 +55,7 @@ function parseFragment(html, doc) {
 function generateCSRClass(compName, cx, explicitClassName) {
   if (cx.csrClasses.has(compName)) return;
 
+  const displayName = resolveDisplayName(compName, cx);
   let instance = cx.loadedComponents.get(compName);
   if (!instance) return;
 
@@ -61,7 +71,7 @@ function generateCSRClass(compName, cx, explicitClassName) {
   const compProps = extractPropsDefaults(script);
   const topFuncSrc = extractTopLevelFunctions(script || "", RUNTIME_KW);
   const topVars = extractTopLevelVariables(script || "");
-  let runtime = extractRuntime(script || "", compName);
+  let runtime = extractRuntime(script || "", displayName);
 
   if (!cx.cssScopesMap.has(compName)) {
     cx.cssScopesMap.set(compName, deterministicHash(compName, 8));
@@ -102,7 +112,7 @@ function generateCSRClass(compName, cx, explicitClassName) {
     reach = computeReachable(parsedForReach, { bindings: [...bindVarNames] });
     if (reach.fallback) {
       // conservative: include all and warn
-      console.warn(chalk.yellow(`WARN ${compName} — dynamic $runtime, including all declarations`));
+      console.warn(chalk.yellow(`WARN ${displayName} — dynamic $runtime, including all declarations`));
     }
   }
   const injectedNames = new Set(compProps.map(p => p.name));
@@ -199,6 +209,7 @@ function findLineInSource(source, regex) {
 }
 
 function warnUnusedDeclarations(cx, compName, instance, script, fragment) {
+  const displayName = resolveDisplayName(compName, cx);
   if (!script && !fragment.querySelector("[bind\\:]")) return;
   if (cx.unusedWarned.has(compName)) return;
   cx.unusedWarned.add(compName);
@@ -240,7 +251,7 @@ function warnUnusedDeclarations(cx, compName, instance, script, fragment) {
   const isUnused = (name) => (counts.get(name) || 0) <= 1;
   const warn = (kind, name, declRegex) => {
     const lineNum = findLineInSource(instance, declRegex);
-    warnUnusedDeclaration(lineNum !== null ? `${compName}:${lineNum}` : compName, kind, name);
+    warnUnusedDeclaration(lineNum !== null ? `${displayName}:${lineNum}` : displayName, kind, name);
   };
 
   for (const name of props) {
@@ -258,7 +269,7 @@ function warnUnusedDeclarations(cx, compName, instance, script, fragment) {
     seenBindings.add(name);
     if (isUnused(name)) {
       const lineNum = findElementLine(instance, element.outerHTML);
-      warnUnusedDeclaration(lineNum !== null ? `${compName}:${lineNum}` : compName, "binding", name);
+      warnUnusedDeclaration(lineNum !== null ? `${displayName}:${lineNum}` : displayName, "binding", name);
     }
   }
 }
@@ -273,6 +284,7 @@ export function processComponentElement(
 ) {
   const tagName = element.tagName.toLowerCase();
   const compName = tagName + ".html";
+  const displayName = resolveDisplayName(compName, cx);
   let instance = cx.loadedComponents.get(compName);
 
   if (!instance || instance === undefined) return false;
@@ -286,7 +298,7 @@ export function processComponentElement(
   let styles = doc.querySelector("style")?.innerHTML;
 
   if (!template) {
-    console.warn(chalk.yellow(`${compName} — component is missing a <template>`));
+    console.warn(chalk.yellow(`${displayName} — component is missing a <template>`));
     return false;
   }
 
@@ -312,7 +324,7 @@ export function processComponentElement(
       for (const imp of importsToGenerate) {
         const isComponent = imp.source.toLowerCase().endsWith(".html");
         if (!isComponent) {
-          console.warn(chalk.yellow(`WARN ${compName} — JS import "${imp.source}" is client-reachable but not bundled (Phase 1: dropping)`));
+          console.warn(chalk.yellow(`WARN ${displayName} — JS import "${imp.source}" is client-reachable but not bundled (Phase 1: dropping)`));
           continue;
         }
         const importedCompName = path.basename(imp.source).toLowerCase();
@@ -447,7 +459,7 @@ export function processComponentElement(
   if (sourceFile) {
     validateChainStructure(slotFragment, sourceFile, sourceContent, elInnerHtml);
   }
-  validateChainStructure(fragment, instance.__sourceFile || compName, instance, template);
+  validateChainStructure(fragment, instance.__sourceFile || displayName, instance, template);
   Array.from(fragment.querySelectorAll("slot")).forEach(slot => {
     slot.replaceWith(slotFragment);
   });
@@ -467,7 +479,7 @@ export function processComponentElement(
     let location = sourceFile;
     if (instance) {
       const lineNum = findElementLine(instance, el.outerHTML);
-      if (lineNum !== null) location = `${compName}:${lineNum}`;
+      if (lineNum !== null) location = `${displayName}:${lineNum}`;
     }
     if (location === sourceFile && sourceContent) {
       const lineNum = findElementLine(sourceContent, el.outerHTML);
@@ -502,7 +514,7 @@ export function processComponentElement(
 
     if (hasElif || hasElse) {
       if (!condChain.active) {
-        throwError(`${instance.__sourceFile || compName}: <${child.tagName.toLowerCase()}> has ${hasElif ? "elif" : "else"} without a preceding if/mount:if sibling`);
+        throwError(`${instance.__sourceFile || displayName}: <${child.tagName.toLowerCase()}> has ${hasElif ? "elif" : "else"} without a preceding if/mount:if sibling`);
       }
       if (condChain.rendered) {
         child.remove();
@@ -591,7 +603,7 @@ export function processComponentElement(
       child,
       cx,
       renderChain.concat(compName),
-      compName,
+      displayName,
       template,
       globalCtx
     );
@@ -648,7 +660,7 @@ export function processComponentElement(
 
       script = script.replace(ctxRegex, "ctx");
 
-      let runtime = extractRuntime(script, compName);
+      let runtime = extractRuntime(script, displayName);
 
       if (runtime) {
         let fnEntry = cx.runtimeMap && cx.runtimeMap.get(compName);
@@ -663,7 +675,7 @@ export function processComponentElement(
               const bindNames = bindings.map(b => b.varName);
               reachInject = computeReachable(parsedReach, { bindings: bindNames });
               if (reachInject.fallback) {
-                console.warn(chalk.yellow(`WARN ${compName} — dynamic $runtime, including all declarations`));
+                console.warn(chalk.yellow(`WARN ${displayName} — dynamic $runtime, including all declarations`));
                 reachInject = null;
               }
             }
@@ -796,9 +808,9 @@ export function processComponentElement(
   return firstChild && firstChild.nodeType === 1 ? firstChild : true;
 }
 
-export function processAllComponents(appElements, loadedComponents, pageSourceFile, pageSourceContent, globalCtx = {}, treeShakeRuntime = true) {
+export function processAllComponents(appElements, loadedComponents, pageSourceFile, pageSourceContent, globalCtx = {}, treeShakeRuntime = true, originalNames = null) {
   const cx = new ProcessContext(
-    loadedComponents, [], [], new Map(), [], new Map(), [], new Map(), new Map(), treeShakeRuntime
+    loadedComponents, [], [], new Map(), [], new Map(), [], new Map(), new Map(), treeShakeRuntime, originalNames
   );
 
   for (const [compName, instance] of cx.loadedComponents) {
