@@ -4,8 +4,8 @@ import { getConfig, isMissingConfigFile, queueConfigWarning } from "../utils.js"
 
 const warnedBundleFields = new Set();
 
-export async function loadConfig(rootDir) {
-  const config = await getConfig(rootDir);
+export async function loadConfig(rootDir, { silent, customPath, overrides } = {}) {
+  const config = await getConfig(rootDir, { silent });
 
   if (isMissingConfigFile(config)) {
     return { srcDir: "src", outDir: "dist", libDir: "lib", emptyOutDir: true, treeShakeRuntime: true };
@@ -16,7 +16,7 @@ export async function loadConfig(rootDir) {
   const bundleConfig = config.bundle || config.build || {};
   const compilerConfig = config.compiler || {};
 
-  if (hasBundle) {
+  if (!silent && hasBundle) {
     if (bundleConfig.srcDir == null && !warnedBundleFields.has(rootDir + ":srcDir")) {
       warnedBundleFields.add(rootDir + ":srcDir");
       queueConfigWarning(rootDir, chalk.bold.yellow("WARNING!"), `bundle.srcDir not defined in chocola.config.json file: using default "src" bundle.srcDir.`);
@@ -37,7 +37,11 @@ export async function loadConfig(rootDir) {
   const emptyOutDir = bundleConfig.emptyOutDir !== false;
   const treeShakeRuntime = compilerConfig.treeShakeRuntime !== false;
 
-  return { srcDir, outDir, libDir, emptyOutDir, treeShakeRuntime };
+  const result = { srcDir, outDir, libDir, emptyOutDir, treeShakeRuntime };
+  if (overrides) {
+    Object.assign(result, overrides);
+  }
+  return result;
 }
 
 export function resolvePaths(rootDir, config) {

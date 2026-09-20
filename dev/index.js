@@ -9,7 +9,7 @@ import { getConfig, isMissingConfigFile, queueConfigWarning } from "../utils.js"
 const warnedDevHostname = new Set();
 const warnedDevPort = new Set();
 
-export async function serve(__rootdir) {
+export async function serve(__rootdir, { silent = false } = {}) {
   let __outdir = "dist";
   let __config = {
     hostname: "localhost",
@@ -18,24 +18,26 @@ export async function serve(__rootdir) {
 
   let lastBuildTime = Date.now();
 
-  const fullConfig = await getConfig(__rootdir);
-  const config = await loadConfig(__rootdir);
+  const fullConfig = await getConfig(__rootdir, { silent });
+  const config = await loadConfig(__rootdir, { silent });
   const paths = resolvePaths(__rootdir, config);
 
-  if (isMissingConfigFile(fullConfig)) {
-    // top-level already warned; use defaults silently
-  } else if (fullConfig.dev != null) {
-    const devConfig = fullConfig.dev;
-    if (devConfig.hostname) { __config.hostname = devConfig.hostname }
-    else if (!warnedDevHostname.has(__rootdir)) {
-      warnedDevHostname.add(__rootdir);
-      queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), `dev.hostname not defined in chocola.config.json file: using default ${__config.hostname} dev.hostname.`);
-    }
+  if (!silent) {
+    if (isMissingConfigFile(fullConfig)) {
+      // top-level already warned; use defaults silently
+    } else if (fullConfig.dev != null) {
+      const devConfig = fullConfig.dev;
+      if (devConfig.hostname) { __config.hostname = devConfig.hostname }
+      else if (!warnedDevHostname.has(__rootdir)) {
+        warnedDevHostname.add(__rootdir);
+        queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), `dev.hostname not defined in chocola.config.json file: using default ${__config.hostname} dev.hostname.`);
+      }
 
-    if (devConfig.port) { __config.port = devConfig.port }
-    else if (!warnedDevPort.has(__rootdir)) {
-      warnedDevPort.add(__rootdir);
-      queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), `dev.port not defined in chocola.config.json file: using default ${__config.port} dev.port.`);
+      if (devConfig.port) { __config.port = devConfig.port }
+      else if (!warnedDevPort.has(__rootdir)) {
+        warnedDevPort.add(__rootdir);
+        queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), `dev.port not defined in chocola.config.json file: using default ${__config.port} dev.port.`);
+      }
     }
   }
 
