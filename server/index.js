@@ -391,8 +391,12 @@ export async function serve(rootDirArg, optsArg) {
    const silent = optsArg?.silent ?? false;
    const fullConfig = await getConfig(rootDir, { silent });
    const serverCfg = fullConfig.server || {};
-   const port = serverCfg.port ?? optsArg?.port ?? 8080;
-   const hostname = serverCfg.hostname ?? serverCfg.host ?? optsArg?.hostname ?? optsArg?.host ?? "localhost";
+   const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
+   const hasEnvPort = Number.isFinite(envPort) && envPort >= 1 && envPort <= 65535;
+   const port = optsArg?.port ?? (hasEnvPort ? envPort : (serverCfg.port ?? 8080));
+   const hasHostFlag = optsArg?.hostname != null || optsArg?.host != null;
+   const hasHostConfig = serverCfg.hostname != null || serverCfg.host != null;
+   const hostname = hasHostFlag ? (optsArg?.hostname ?? optsArg?.host) : (hasEnvPort && !hasHostConfig ? "0.0.0.0" : (serverCfg.hostname ?? serverCfg.host ?? "localhost"));
 
    if (!silent) {
      if (isMissingConfigFile(fullConfig)) {
