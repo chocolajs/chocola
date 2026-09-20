@@ -15,36 +15,36 @@ const GOLD_COLOR = "#D87416";
 const WHITE_COLOR = "#FAFAF8";
 const TEXT_FAINT = "#E7EBE1";
 
-function logBanner() {
+export function logBanner() {
+  const plain = process.env.NO_COLOR === "1";
+  const ch = plain ? (() => (s) => s) : chalk;
   console.log(
-    chalk.hex(GOLD_COLOR)(`
-   ┌─────────────────────────────────────────────┐
-   │┌-------------------------------------------┐│
-   ││                                           ││`)
+    ch.hex(GOLD_COLOR)(`
+    ┌─────────────────────────────────────────────┐
+    │┌-------------------------------------------┐│
+    ││                                           ││`)
   );
   console.log(
-    chalk.hex(GOLD_COLOR)(`   ││            `) +
-    chalk.bold.hex(WHITE_COLOR)(`{`) +
-    chalk.bold.hex(GOLD_COLOR)(`  C H O C O L A  `) +
-    chalk.bold.hex(WHITE_COLOR)(`}`) +
-    chalk.hex(GOLD_COLOR)(`            ││\n`) +
-    chalk.hex(GOLD_COLOR)(`   ││                                           ││
-   ││     `) +
-   chalk.hex(TEXT_FAINT)(`THE SWEETEST WAY TO BUILD THE WEB`) +
-   chalk.hex(GOLD_COLOR)(`     ││
-   ││                                           ││
-   │└-------------------------------------------┘│
-   └─────────────────────────────────────────────┘
-   `)
+    ch.hex(GOLD_COLOR)(`    ││            `) +
+    ch.bold.hex(WHITE_COLOR)(`{`) +
+    ch.bold.hex(GOLD_COLOR)(`  C H O C O L A  `) +
+    ch.bold.hex(WHITE_COLOR)(`}`) +
+    ch.hex(GOLD_COLOR)(`            ││\n`) +
+    ch.hex(GOLD_COLOR)(`    ││                                           ││
+    ││     `) +
+    ch.hex(TEXT_FAINT)(`THE SWEETEST WAY TO BUILD THE WEB`) +
+    ch.hex(GOLD_COLOR)(`     ││
+    ││                                           ││
+    │└-------------------------------------------┘│
+    └─────────────────────────────────────────────┘
+    `)
   );
 }
 
 function logSuccess(outDirPath, durationMs) {
-  console.log(
-    chalk.bold.green(">"),
-    "Project bundled succesfully at",
-    chalk.green.underline(outDirPath));
-    console.log(chalk.bold.green(`\nJOB DONE!`) + chalk.hex(TEXT_FAINT)(` (${formatDuration(durationMs)})\n`));
+  const plain = process.env.NO_COLOR === "1";
+  const ch = plain ? (() => (s) => s) : chalk;
+  console.log(ch.bold.green(`\nJOB DONE!`) + ch.hex(TEXT_FAINT)(` (${formatDuration(durationMs)})\n`));
 }
 
 function formatDuration(ms) {

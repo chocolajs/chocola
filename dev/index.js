@@ -158,10 +158,11 @@ export async function serve(__rootdir, { silent = false } = {}) {
     });
   });
 
-  server.listen(__config.port, __config.hostname, () => {
-    console.log('Live server running at', chalk.hex("#68C4EE").underline(`http://${__config.hostname}:${__config.port}/`));
-  });
-}
+server.listen(__config.port, __config.hostname, () => {
+     console.log('Live server running at', chalk.hex("#68C4EE").underline(`http://${__config.hostname}:${__config.port}/`));
+   });
+   return server;
+ }
 
 /**
  * An intrinsic object that contains the Chocola Dev methods.
