@@ -196,8 +196,8 @@ function scanAssetModules(doc, graph) {
   return deps;
 }
 
-export async function buildModuleGraph(rootDir) {
-  const config = await loadConfig(rootDir);
+export async function buildModuleGraph(rootDir, { overrides } = {}) {
+  const config = overrides ? await loadConfig(rootDir, { silent: true, overrides }) : await loadConfig(rootDir);
   const paths = resolvePaths(rootDir, config);
 
   const graph = new ModuleGraph(rootDir, config, paths);

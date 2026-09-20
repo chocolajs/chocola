@@ -154,7 +154,7 @@ export async function main() {
     const rawPort = flags.port ? parsePort(flags.port) : undefined;
     const effectiveHost = flags.host || flags.hostname;
 
-    const { effectiveDev, effectiveServer } = await resolveConfig(rootDir, {
+    const { base, effectiveDev, effectiveServer } = await resolveConfig(rootDir, {
       outDir: flags.outDir,
       srcDir: flags.srcDir,
       libDir: flags.libDir,
@@ -177,7 +177,7 @@ export async function main() {
       case "build": {
         const local = await getLocalModules(rootDir);
         const compile = local ? local.mod.default : (await import("../compiler/index.js")).default;
-        await compile(rootDir);
+        await compile(rootDir, { overrides: base });
         process.exit(0);
       }
       case "dev": {

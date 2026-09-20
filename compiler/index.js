@@ -88,10 +88,11 @@ export async function emit(graph, options = {}) {
 
 export default async function compile(rootDir, buildConfig) {
   const isHotReload = buildConfig?.isHotReload || null;
+  const overrides = buildConfig?.overrides || null;
   const startTime = performance.now();
   !isHotReload && logBanner();
 
-  const graph = await buildModuleGraph(rootDir);
+  const graph = await buildModuleGraph(rootDir, { overrides });
 
   !isHotReload && console.log(chalk.bold.green(">"), "Creating Chocola static build in directory", chalk.green.underline(graph.paths.outDir));
 
