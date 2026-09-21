@@ -9,7 +9,7 @@ import { getConfig, isMissingConfigFile, queueConfigWarning } from "../utils.js"
 const warnedDevHostname = new Set();
 const warnedDevPort = new Set();
 
-export async function serve(__rootdir) {
+export async function serve(__rootdir, { silent = false, port: cliPort, hostname: cliHostname, open } = {}) {
   let __outdir = "dist";
   let __config = {
     hostname: "localhost",
@@ -18,24 +18,37 @@ export async function serve(__rootdir) {
 
   let lastBuildTime = Date.now();
 
-  const fullConfig = await getConfig(__rootdir);
-  const config = await loadConfig(__rootdir);
+  const fullConfig = await getConfig(__rootdir, { silent });
+  const config = await loadConfig(__rootdir, { silent });
   const paths = resolvePaths(__rootdir, config);
 
-  if (isMissingConfigFile(fullConfig)) {
-    // top-level already warned; use defaults silently
-  } else if (fullConfig.dev != null) {
-    const devConfig = fullConfig.dev;
-    if (devConfig.hostname) { __config.hostname = devConfig.hostname }
-    else if (!warnedDevHostname.has(__rootdir)) {
-      warnedDevHostname.add(__rootdir);
-      queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), `dev.hostname not defined in chocola.config.json file: using default ${__config.hostname} dev.hostname.`);
+  if (cliPort) {
+    __config.port = cliPort;
+  } else if (!silent) {
+    if (isMissingConfigFile(fullConfig)) {
+      // top-level already warned; use defaults silently
+    } else if (fullConfig.dev != null) {
+      const devConfig = fullConfig.dev;
+      if (devConfig.port) { __config.port = devConfig.port }
+      else if (!warnedDevPort.has(__rootdir)) {
+        warnedDevPort.add(__rootdir);
+        queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), `dev.port not defined in chocola.config.json file: using default ${__config.port} dev.port.`);
+      }
     }
+  }
 
-    if (devConfig.port) { __config.port = devConfig.port }
-    else if (!warnedDevPort.has(__rootdir)) {
-      warnedDevPort.add(__rootdir);
-      queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), `dev.port not defined in chocola.config.json file: using default ${__config.port} dev.port.`);
+  if (cliHostname) {
+    __config.hostname = cliHostname;
+  } else if (!silent) {
+    if (!cliPort && isMissingConfigFile(fullConfig)) {
+      // top-level already warned
+    } else if (fullConfig.dev != null) {
+      const devConfig = fullConfig.dev;
+      if (devConfig.hostname) { __config.hostname = devConfig.hostname }
+      else if (!warnedDevHostname.has(__rootdir)) {
+        warnedDevHostname.add(__rootdir);
+        queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), `dev.hostname not defined in chocola.config.json file: using default ${__config.hostname} dev.hostname.`);
+      }
     }
   }
 
@@ -156,10 +169,22 @@ export async function serve(__rootdir) {
     });
   });
 
-  server.listen(__config.port, __config.hostname, () => {
-    console.log('Live server running at', chalk.hex("#68C4EE").underline(`http://${__config.hostname}:${__config.port}/`));
-  });
-}
+server.listen(__config.port, __config.hostname, async () => {
+      console.log('Live server running at', chalk.hex("#68C4EE").underline(`http://${__config.hostname}:${__config.port}/`));
+      if (open) {
+        const url = __config.hostname === "0.0.0.0" ? `http://localhost:${__config.port}` : `http://${__config.hostname}:${__config.port}`;
+        try {
+          const openPkg = await import("open");
+          openPkg.default(url);
+        } catch {
+          const { exec } = await import("child_process");
+          const cmd = process.platform === "win32" ? `start ${url}` : process.platform === "darwin" ? `open ${url}` : `xdg-open ${url}`;
+          exec(cmd);
+        }
+      }
+    });
+    return server;
+  }
 
 /**
  * An intrinsic object that contains the Chocola Dev methods.

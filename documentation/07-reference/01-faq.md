@@ -11,9 +11,17 @@ Chocola is a small web framework that lets you build apps out of reusable compon
 
 ### How do I get a project up and running?
 
-Install Chocola with `npm install chocola`, then create `chocola.config.json` (tells Chocola where your files live), `chocola.js` (runs the build), and `chocola.server.js` (dev server with `chocola/dev`). Your HTML entry point lives at `src/index.html`.
+Install Chocola with `npm install chocola`, then create `chocola.config.json` (optional — defaults are used if absent) and `src/index.html`. Use the CLI:
 
-Once that's in place, `node chocola.server.js` gets you a live-reloading browser preview for development. For production SSR, use `chocola/server` (`serve()` or `createHandler()`).
+```sh
+npx chocola dev        # dev server with HMR
+npx chocola build      # production build
+npx chocola serve      # SSR production server
+```
+
+Your HTML entry point lives at `src/index.html`.
+
+Use the CLI for all operations: `npx chocola dev` for live-reloading dev, `npx chocola build` for production, `npx chocola serve` for SSR. For advanced use, programmatic APIs (`createHandler`, `serve`) are available from `chocola/server`.
 
 ### Why does my HTML need an `<app>` tag?
 

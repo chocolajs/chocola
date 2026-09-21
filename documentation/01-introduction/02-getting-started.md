@@ -11,10 +11,11 @@ my-app/
 │   ├── lib/
 │   ├── static/
 │   └── index.html
-├── chocola.config.json
-├── chocola.server.js
-└── chocola.js
+└── chocola.config.json (optional)
+└── package.json
 ```
+
+> **Note:** `chocola.js`, `chocola.server.js`, and `server.js` are **legacy**. Replaced by `chocola build`, `chocola dev`, `chocola serve` CLI. See [Project structure — Migration](03-project-structure.md#migration) below.
 
 ## 2. Install Chocola
 
@@ -44,54 +45,13 @@ npm install chocola
 }
 ```
 
-## 4. Create `chocola.js`
+## 4. Install Chocola
 
-```js
-// file: chocola.js
-import { app } from "chocola/compiler";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-app.build(__dirname);
+```sh
+npm install chocola
 ```
 
-## 5. Create `chocola.server.js` — Dev server
-
-```js
-// file: chocola.server.js
-import { dev } from "chocola/dev";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-dev.server(__dirname);
-```
-
-For production SSR, create a separate entry (e.g. `server.js`):
-
-```js
-// file: server.js
-import { serve } from "chocola/server";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// honors chocola.config.json -> server.port / hostname / middleware
-serve(__dirname);
-
-// Or bare handler: import { createHandler } from "chocola/server";
-// const handler = await createHandler(__dirname);
-// http.createServer(handler).listen(8080);
-```
-
-## 6. Initialize your index page
+## 5. Initialize your index page
 
 Write something in your `src/index.html` index page. Remember to include an `<app>` element — that's where Chocola applies its magic.
 
@@ -109,4 +69,38 @@ Write something in your `src/index.html` index page. Remember to include an `<ap
 </html>
 ```
 
-Now you're all set! Run `node chocola.server.js` for local dev with hot-reload, `node chocola.js` for a static build, or `node server.js` for SSR.
+## 6. Run Chocola
+
+No init scripts needed — Chocola ships a CLI that handles everything:
+
+```sh
+# Start dev server with HMR on port 3000
+npx chocola dev
+
+# Build for production
+npx chocola build
+
+# Start SSR production server
+npx chocola serve
+
+# Override defaults with flags
+npx chocola dev --port 5173 --host 0.0.0.0
+npx chocola build --outDir ./tmp/build --srcDir ./src
+npx chocola serve --port $PORT --host 0.0.0.0
+```
+
+With a `chocola.config.json` (optional), CLI flags take precedence:
+
+```json
+{
+  "bundle": { "outDir": "build" },
+  "dev": { "port": 5173 },
+  "server": { "middleware": "./middleware.js" }
+}
+```
+
+```sh
+chocola dev --port 4000   # flag wins over config (4000), config wins over default (5173 vs 3000)
+```
+
+For advanced use, programmatic APIs remain available: `app.build(__dirname)`, `dev.server(__dirname)`, `serve(__dirname)`, `createHandler(__dirname)`.

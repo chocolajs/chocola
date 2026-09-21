@@ -185,11 +185,12 @@ function normalizeRootDir(arg, opts) {
 }
 
 export async function createHandler(rootDirArg, optsArg) {
-  const { rootDir, opts } = normalizeRootDir(rootDirArg, optsArg);
+   const { rootDir, opts } = normalizeRootDir(rootDirArg, optsArg);
+   const silent = opts.silent ?? false;
 
-  const fullConfig = await getConfig(rootDir);
-  const config = await loadConfig(rootDir);
-  const paths = resolvePaths(rootDir, config);
+   const fullConfig = await getConfig(rootDir, { silent });
+   const config = await loadConfig(rootDir, { silent });
+   const paths = resolvePaths(rootDir, config);
 
   const graph = await buildModuleGraph(rootDir);
 
@@ -386,24 +387,31 @@ export const createServer = createHandler;
 export const createServerRenderer = createHandler; // future ssr escape hatch alias
 
 export async function serve(rootDirArg, optsArg) {
-  const { rootDir } = normalizeRootDir(rootDirArg, optsArg);
-  const fullConfig = await getConfig(rootDir);
-  const serverCfg = fullConfig.server || {};
-  const port = serverCfg.port ?? optsArg?.port ?? 8080;
-  const hostname = serverCfg.hostname ?? serverCfg.host ?? optsArg?.hostname ?? optsArg?.host ?? "localhost";
+   const { rootDir } = normalizeRootDir(rootDirArg, optsArg);
+   const silent = optsArg?.silent ?? false;
+   const fullConfig = await getConfig(rootDir, { silent });
+   const serverCfg = fullConfig.server || {};
+   const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
+   const hasEnvPort = Number.isFinite(envPort) && envPort >= 1 && envPort <= 65535;
+   const port = optsArg?.port ?? (hasEnvPort ? envPort : (serverCfg.port ?? 8080));
+   const hasHostFlag = optsArg?.hostname != null || optsArg?.host != null;
+   const hasHostConfig = serverCfg.hostname != null || serverCfg.host != null;
+   const hostname = hasHostFlag ? (optsArg?.hostname ?? optsArg?.host) : (hasEnvPort && !hasHostConfig ? "0.0.0.0" : (serverCfg.hostname ?? serverCfg.host ?? "localhost"));
 
-  if (isMissingConfigFile(fullConfig)) {
-    // top-level already warned
-  } else if (fullConfig.server != null) {
-    if (serverCfg.port == null && optsArg?.port == null && !warnedServerPort.has(rootDir)) {
-      warnedServerPort.add(rootDir);
-      queueConfigWarning(rootDir, chalk.bold.yellow("WARNING!"), `server.port not defined in chocola.config.json file: using default ${port} server.port.`);
-    }
-    if ((serverCfg.hostname == null && serverCfg.host == null) && (optsArg?.hostname == null && optsArg?.host == null) && !warnedServerHostname.has(rootDir)) {
-      warnedServerHostname.add(rootDir);
-      queueConfigWarning(rootDir, chalk.bold.yellow("WARNING!"), `server.hostname not defined in chocola.config.json file: using default ${hostname} server.hostname.`);
-    }
-  }
+   if (!silent) {
+     if (isMissingConfigFile(fullConfig)) {
+       // top-level already warned
+     } else if (fullConfig.server != null) {
+       if (serverCfg.port == null && optsArg?.port == null && !warnedServerPort.has(rootDir)) {
+         warnedServerPort.add(rootDir);
+         queueConfigWarning(rootDir, chalk.bold.yellow("WARNING!"), `server.port not defined in chocola.config.json file: using default ${port} server.port.`);
+       }
+       if ((serverCfg.hostname == null && serverCfg.host == null) && (optsArg?.hostname == null && optsArg?.host == null) && !warnedServerHostname.has(rootDir)) {
+         warnedServerHostname.add(rootDir);
+         queueConfigWarning(rootDir, chalk.bold.yellow("WARNING!"), `server.hostname not defined in chocola.config.json file: using default ${hostname} server.hostname.`);
+       }
+     }
+   }
 
   const handler = await createHandler(rootDir, optsArg);
 

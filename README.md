@@ -40,4 +40,17 @@ Import components. Instantiate them. Mount, update, remove. Client-side or serve
 
 ## Documentation
 
-https://github.com/chocolajs/chocola/tree/main/documentation
+- [Getting started](documentation/01-introduction/02-getting-started.md)
+- [Project structure](documentation/01-introduction/03-project-structure.md)
+- [CLI reference](documentation/07-reference/04-cli.md)
+
+## Quick start
+
+```sh
+npm install chocola
+npx chocola dev        # dev server
+npx chocola build      # production build
+npx chocola serve      # SSR production server
+```
+
+No init scripts required: `chocola.config.json` is optional. See [Getting started](documentation/01-introduction/02-getting-started.md) for more.

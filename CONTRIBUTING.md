@@ -74,6 +74,8 @@ Ensure you have [npm](https://nodejs.org/es/download/current) installed. After c
 
 Once set, run `npm pack` to build a node package and test it in any project.
 
+Test the CLI with `node ./bin/chocola.js --help`.
+
 ### Creating a branch
 
 Fork [the repository](https://github.com/chocolajs/chocola) and create your branch from `main`. If you've never sent a GitHub pull request before, you can learn how from [this free video series](https://egghead.io/courses/how-to-contribute-to-an-open-source-project-on-github).

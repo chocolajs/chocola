@@ -37,7 +37,7 @@ export function flushConfigWarnings(rootDir) {
   }
 }
 
-export async function getConfig(__rootdir) {
+export async function getConfig(__rootdir, { silent } = {}) {
     try {
         const raw = await fs.readFile(path.join(__rootdir, "chocola.config.json"), "utf-8");
         const config = JSON.parse(raw);
@@ -47,23 +47,25 @@ export async function getConfig(__rootdir) {
         const hasDev = config.dev !== undefined && config.dev !== null;
         const hasServer = config.server !== undefined && config.server !== null;
 
-        if (!hasBundle && !warnedBlockBundle.has(__rootdir)) {
-            warnedBlockBundle.add(__rootdir);
-            queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), "bundle config not defined in chocola.config.json file: using default bundle configuration.");
-        }
-        if (!hasDev && !warnedBlockDev.has(__rootdir)) {
-            warnedBlockDev.add(__rootdir);
-            queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), "dev config not defined in chocola.config.json file: using default dev configuration.");
-        }
-        if (!hasServer && !warnedBlockServer.has(__rootdir)) {
-            warnedBlockServer.add(__rootdir);
-            queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), "server config not defined in chocola.config.json file: using default server configuration.");
+        if (!silent) {
+          if (!hasBundle && !warnedBlockBundle.has(__rootdir)) {
+              warnedBlockBundle.add(__rootdir);
+              queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), "bundle config not defined in chocola.config.json file: using default bundle configuration.");
+          }
+          if (!hasDev && !warnedBlockDev.has(__rootdir)) {
+              warnedBlockDev.add(__rootdir);
+              queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), "dev config not defined in chocola.config.json file: using default dev configuration.");
+          }
+          if (!hasServer && !warnedBlockServer.has(__rootdir)) {
+              warnedBlockServer.add(__rootdir);
+              queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), "server config not defined in chocola.config.json file: using default server configuration.");
+          }
         }
 
         return config;
     } catch(err) {
         if (err && err.code === "ENOENT") {
-            if (!warnedMissing.has(__rootdir)) {
+            if (!silent && !warnedMissing.has(__rootdir)) {
                 warnedMissing.add(__rootdir);
                 queueConfigWarning(__rootdir, chalk.bold.yellow("WARNING!"), "chocola.config.json not found: using default configuration.");
             }

@@ -37,6 +37,19 @@
     "./dev": "./dev/index.js",
     "./server": "./server/index.js"
   },
+  "bin": {
+    "chocola": "./bin/chocola.js",
+    "chjs": "./bin/chocola.js"
+  },
+  "files": [
+    "bin/",
+    "compiler/",
+    "dev/",
+    "server/",
+    "runtime/",
+    "parser/",
+    "utils.js"
+  ],
   "dependencies": {
     "acorn": "^8.18.0",
     "linkedom": "^0.18.13"
