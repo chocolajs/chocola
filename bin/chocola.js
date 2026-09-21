@@ -24,9 +24,9 @@ export async function resolveConfig(rootDir, cliOverrides, configPathOpt) {
     : await getConfig(rootDir, { silent: true });
   const isMissing = customPath ? false : isMissingConfigFile(fullConfig);
   const base = await loadConfig(rootDir, { silent: true, customPath });
-  if (cliOverrides.outDir) base.outDir = cliOverrides.outDir;
-  if (cliOverrides.srcDir) base.srcDir = cliOverrides.srcDir;
-  if (cliOverrides.libDir) base.libDir = cliOverrides.libDir;
+  if (cliOverrides.outDir) base.outDir = path.resolve(rootDir, cliOverrides.outDir);
+  if (cliOverrides.srcDir) base.srcDir = path.resolve(rootDir, cliOverrides.srcDir);
+  if (cliOverrides.libDir) base.libDir = path.resolve(rootDir, cliOverrides.libDir);
   if (cliOverrides.emptyOutDir != null) base.emptyOutDir = cliOverrides.emptyOutDir;
   const effectiveDev = { hostname: "localhost", port: 3000, ...(!isMissing && fullConfig.dev || {}), ...cliOverrides.dev };
   const effectiveServer = { hostname: "localhost", port: 8080, middleware: null, ...(!isMissing && fullConfig.server || {}), ...cliOverrides.server };
