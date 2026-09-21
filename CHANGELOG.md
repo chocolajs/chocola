@@ -1,5 +1,17 @@
 # Chocola Changelog
 
+## 2.0.0-next.11 (Sep 20, 2026)
+
+- `<script>` now resolves server-side to minimize bundle size (@sadgabi20: [#147](https://github.com/chocolajs/chocola/issues/147)).
+- Minimal optimizations (@sadgabi20: [#164](https://github.com/chocolajs/chocola/issues/164))
+- Added portable CLI `chocola`/`chjs` (@sadgabi20: [#179](https://github.com/chocolajs/chocola/issues/179)):
+  - `build`: creates a static build
+  - `dev`: inits the dev server
+  - `serve`: serves the SSR apps
+  - More options (port, hostname, open, middleware, etc.)
+  - `chocola.config.json` is now optional: Chocola becomes zero-config
+  - User-authored scripts are now legacy: Chocola becomes zero-boilerplate
+
 ## 2.0.0-next.10 (Sep 06, 2026)
 
 - Added server-side rendering: you can now deploy with `chocola/server` to render pages per request, with built-in handling for query params, middleware, and static assets (including caching and compression) ([#118](https://github.com/chocolajs/chocola/issues/118))
