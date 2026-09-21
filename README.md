@@ -15,10 +15,9 @@ Import components. Instantiate them. Mount, update, remove. Client-side or serve
 <script>
     import CoolButton from './CoolButton.html';
 
-    let self;
-    let input;
-
     export let title = "Hello";
+
+    let input;
 
     function $runtime() {
         input.focus();
