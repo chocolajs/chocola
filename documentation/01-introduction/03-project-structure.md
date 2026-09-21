@@ -19,12 +19,12 @@ my-app/
 │   └── index.html
 ├── .chocola/
 │   └── hashes.json
-├── chocola.config.json
-├── chocola.server.js
-├── chocola.js
+├── chocola.config.json (optional)
 ├── package.json
 └── .gitignore
 ```
+
+> **Note:** `chocola.js`, `chocola.server.js`, and `server.js` are **legacy init scripts**. The `chocola` CLI (`npx chocola build`, `chocola dev`, `chocola serve`) replaces all three. They remain runnable with `node` but are no longer required. See [Migration](#migration) below.
 
 ## `src/` — Source directory
 
@@ -103,7 +103,9 @@ Defines the paths and dev server settings:
 | `server.port` | `8080` | SSR server port |
 | `server.middleware` | `null` | Path to ESM middleware file (relative to project root) |
 
-## `chocola.js` — Build script
+## `chocola.js` — Build script (legacy)
+
+> **Legacy.** Replaced by `chocola build` CLI. Kept for backward compatibility with `node chocola.js`.
 
 Runs a production build:
 
@@ -118,7 +120,9 @@ const __dirname = path.dirname(__filename);
 app.build(__dirname);
 ```
 
-## `chocola.server.js` — Dev server
+## `chocola.server.js` — Dev server (legacy)
+
+> **Legacy.** Replaced by `chocola dev` CLI. Kept for backward compatibility with `node chocola.server.js`.
 
 Starts the development server with hot reload (`chocola/dev`):
 
@@ -133,7 +137,9 @@ const __dirname = path.dirname(__filename);
 dev.server(__dirname);
 ```
 
-## `server.js` — SSR server (production)
+## `server.js` — SSR server (legacy)
+
+> **Legacy.** Replaced by `chocola serve` CLI. Kept for backward compatibility with `node server.js`.
 
 For deployable server-side rendering (`chocola/server`):
 
@@ -181,3 +187,13 @@ node_modules/
 dist/
 .chocola/
 ```
+
+## Migration from init scripts
+
+If your project has `chocola.js`, `chocola.server.js`, or `server.js`, you can remove them and use the CLI instead:
+
+```sh
+rm chocola.js chocola.server.js server.js
+```
+
+Then use `chocola build`, `chocola dev`, or `chocola serve` in their place. The CLI uses the same `chocola.config.json` and produces identical output. Programmatic APIs (`app.build`, `dev.server`, `serve`, `createHandler`) remain available for custom Node tooling.

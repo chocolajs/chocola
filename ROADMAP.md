@@ -38,7 +38,7 @@ The following changes are planned to be implemented in future releases once the 
 - [ ] Reactivity with `${foo}` bindings
 - [ ] Global state and lifecycle hooks
 - [ ] `$bake` and `$cast` directives for fine-grained statefulness management
-- [ ] Global portable CLI
+- [x] Global portable CLI
 
 ---
 

@@ -8,7 +8,7 @@ description: Dev server, SSR server, testing and benchmarks
 To test your Chocola app with hot-reload, run:
 
 ```sh
-node chocola.server.js
+npx chocola dev
 ```
 
 This starts a local dev server (`chocola/dev`) that rebuilds and live-reloads on file changes (polling `/api/hot-reload`). Use it for development — not for production.
@@ -17,7 +17,11 @@ This starts a local dev server (`chocola/dev`) that rebuilds and live-reloads on
 
 For server-side rendering in production, use `chocola/server`:
 
-```js
+```sh
+npx chocola serve
+```
+
+Or programmatically with `createHandler`/`serve` from `chocola/server`.
 import { serve, createHandler } from "chocola/server";
 import http from "http";
 
