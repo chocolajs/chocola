@@ -4,9 +4,9 @@ import { fileURLToPath, pathToFileURL } from "url";
 import { createRequire } from "module";
 import { readFile } from "fs/promises";
 import { getConfig, isMissingConfigFile } from "../utils.js";
-import { loadConfig } from "../compiler/config.js";
+import { loadConfig } from "../../compiler/config.js";
 
-import chalk from "../compiler/chalk.js";
+import chalk from "../../compiler/chalk.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -94,8 +94,14 @@ async function getLocalModules(rootDir) {
 
 async function banner() {
   if (!isPlain) {
-    const { logBanner } = await import("../compiler/index.js");
-    logBanner();
+    console.log("\n    ┌─────────────────────────────────────────────┐");
+    console.log("    │┌-------------------------------------------┐│");
+    console.log("    ││                                          ││");
+    console.log("    ││            {  C H O C O L A  }            ││");
+    console.log("    ││          THE SWEETEST WAY TO BUILD THE WEB ││");
+    console.log("    ││                                          ││");
+    console.log("    │└-------------------------------------------┘│");
+    console.log("    └─────────────────────────────────────────────┘");
   }
 }
 
@@ -135,7 +141,7 @@ export async function main() {
     return;
   }
   if (cmd === "version") {
-    const pkg = await readFile(path.join(__dirname, "../package.json"), "utf-8");
+    const pkg = await readFile(path.join(__dirname, "../../package.json"), "utf-8");
     console.log(JSON.parse(pkg).version);
     return;
   }
@@ -176,7 +182,7 @@ export async function main() {
     switch (cmd) {
       case "build": {
         const local = await getLocalModules(rootDir);
-        const compile = local ? local.mod.default : (await import("../compiler/index.js")).default;
+        const compile = local ? local.mod.default : (await import("../../compiler/index.js")).default;
         await compile(rootDir, { overrides: base });
         process.exit(0);
       }

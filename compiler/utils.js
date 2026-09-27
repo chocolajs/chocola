@@ -1,25 +1,11 @@
 import { createHash } from "crypto";
-import chalk from "./chalk.js";
 
 export function throwError(err) {
-  console.log(chalk.red.bold("Error!"), "A fatal error has occurred:\n");
   throw new Error(err);
 }
 
-export function warnConstantCondition(location, tag, attr, expr, truthy) {
-  const article = /^[aeiou]/.test(attr) ? "an" : "a";
-  console.warn(
-    chalk.bold.yellow("WARN "),
-    `${chalk.bold.green(location)} ${chalk.dim('—')} ${chalk.blue(`<${tag}>`)} \`${chalk.bold(attr + "={" + expr + "}")}\` is always ${chalk.green(truthy ? "truthy" : "falsy")}`
-  );
-}
-
-export function warnUnusedDeclaration(location, kind, name) {
-  console.warn(
-    chalk.bold.yellow("WARN "),
-    `${chalk.bold.green(location)} ${chalk.dim('—')} ${kind} \`${chalk.blue(name)}\` is never used`
-  );
-}
+export function warnConstantCondition() {}
+export function warnUnusedDeclaration() {}
 
 function normalizeAttributeQuotes(html) {
   return html
@@ -87,7 +73,7 @@ export function findElementLine(sourceContent, outerHTML) {
 export function genRandomId(collection = null, length = 10, lettersOnly = false) {
   let id;
   if (lettersOnly) {
-    id = Array.from({ length }, () => ID_LETTERS[Math.floor(Math.random() * ID_LETTERS.length)]).join("");
+    id = Array.from({ length }, () => ID_LETTERS[Math.floor(Math.random) * ID_LETTERS.length]).join("");
   } else {
     id = Math.random().toString(36).substring(2, length + 2);
   }

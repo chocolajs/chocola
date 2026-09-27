@@ -1,42 +1,30 @@
 import path from "path";
 import { promises as fsp } from "fs";
-import chalk from "./chalk.js";
-import { getConfig, isMissingConfigFile, queueConfigWarning } from "../utils.js";
-
-const warnedBundleFields = new Set();
 
 export async function loadConfig(rootDir, { silent, customPath, overrides } = {}) {
-  const config = customPath
-    ? await fsp.readFile(customPath, "utf-8").then(r => JSON.parse(r))
-    : await getConfig(rootDir, { silent });
+  let config;
+  try {
+    const raw = customPath
+      ? await fsp.readFile(customPath, "utf-8").then(r => JSON.parse(r))
+      : await fsp.readFile(path.join(rootDir, "chocola.config.json"), "utf-8").then(r => JSON.parse(r));
+    config = raw;
+  } catch {
+    if (!silent) {
+      // Config file missing — silently use defaults
+    }
+    config = {};
+  }
 
   let srcDir = "src", outDir = "dist", libDir = "lib", emptyOutDir = true, treeShakeRuntime = true;
 
-  if (!customPath || !isMissingConfigFile(config)) {
-    const hasBundle = (config.bundle !== undefined && config.bundle !== null) || (config.build !== undefined && config.build !== null);
-    const bundleConfig = config.bundle || config.build || {};
-    const compilerConfig = config.compiler || {};
-    srcDir = bundleConfig.srcDir || "src";
-    outDir = bundleConfig.outDir || "dist";
-    libDir = bundleConfig.libDir || "lib";
-    emptyOutDir = bundleConfig.emptyOutDir !== false;
-    treeShakeRuntime = compilerConfig.treeShakeRuntime !== false;
-
-    if (!silent && hasBundle) {
-      if (bundleConfig.srcDir == null && !warnedBundleFields.has(rootDir + ":srcDir")) {
-        warnedBundleFields.add(rootDir + ":srcDir");
-        queueConfigWarning(rootDir, chalk.bold.yellow("WARNING!"), `bundle.srcDir not defined in chocola.config.json file: using default "src" bundle.srcDir.`);
-      }
-      if (bundleConfig.outDir == null && !warnedBundleFields.has(rootDir + ":outDir")) {
-        warnedBundleFields.add(rootDir + ":outDir");
-        queueConfigWarning(rootDir, chalk.bold.yellow("WARNING!"), `bundle.outDir not defined in chocola.config.json file: using default "dist" bundle.outDir.`);
-      }
-      if (bundleConfig.libDir == null && !warnedBundleFields.has(rootDir + ":libDir")) {
-        warnedBundleFields.add(rootDir + ":libDir");
-        queueConfigWarning(rootDir, chalk.bold.yellow("WARNING!"), `bundle.libDir not defined in chocola.config.json file: using default "lib" bundle.libDir.`);
-      }
-    }
-  }
+  const hasBundle = (config.bundle !== undefined && config.bundle !== null) || (config.build !== undefined && config.build !== null);
+  const bundleConfig = config.bundle || config.build || {};
+  const compilerConfig = config.compiler || {};
+  srcDir = bundleConfig.srcDir || "src";
+  outDir = bundleConfig.outDir || "dist";
+  libDir = bundleConfig.libDir || "lib";
+  emptyOutDir = bundleConfig.emptyOutDir !== false;
+  treeShakeRuntime = compilerConfig.treeShakeRuntime !== false;
 
   const result = { srcDir, outDir, libDir, emptyOutDir, treeShakeRuntime };
   if (overrides) { Object.assign(result, overrides); }

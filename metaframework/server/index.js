@@ -5,10 +5,10 @@ import { createHash } from "crypto";
 import zlib from "zlib";
 import { pathToFileURL } from "url";
 
-import chalk from "../compiler/chalk.js";
-import { buildModuleGraph } from "../compiler/module-graph.js";
-import { renderPage } from "../compiler/render.js";
-import { loadConfig, resolvePaths } from "../compiler/config.js";
+import chalk from "../../compiler/chalk.js";
+import { buildModuleGraph } from "../../compiler/module-graph.js";
+import { renderPage } from "../../compiler/render.js";
+import { loadConfig, resolvePaths } from "../../compiler/config.js";
 import { getConfig, isMissingConfigFile, queueConfigWarning, flushConfigWarnings } from "../utils.js";
 
 const warnedServerPort = new Set();

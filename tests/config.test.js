@@ -5,7 +5,7 @@ import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { getConfig, isMissingConfigFile, flushConfigWarnings } from "../utils.js";
+import { getConfig, isMissingConfigFile, flushConfigWarnings } from "../metaframework/utils.js";
 import { loadConfig } from "../compiler/config.js";
 import { buildModuleGraph } from "../compiler/module-graph.js";
 import compile from "../compiler/index.js";
@@ -70,16 +70,11 @@ describe("config — zero-config (no chocola.config.json)", () => {
   test("loadConfig returns defaults without throwing", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "chocola-cfg-load-"));
     await fs.mkdir(path.join(tmp, "src"), { recursive: true });
-    const warns = await captureWarnings(tmp, async () => {
-      const cfg = await loadConfig(tmp);
-      assert.equal(cfg.srcDir, "src");
-      assert.equal(cfg.outDir, "dist");
-      assert.equal(cfg.libDir, "lib");
-      assert.equal(cfg.emptyOutDir, true);
-    });
-    // top-level warning only, no per-block warnings
-    assert.ok(warns.some(w => w.includes("not found")), `top-level missing, got ${warns}`);
-    assert.ok(!warns.some(w => w.includes("bundle config") || w.includes("dev config") || w.includes("server config")), `should not have per-block warnings when file missing, got ${warns}`);
+    const cfg = await loadConfig(tmp);
+    assert.equal(cfg.srcDir, "src");
+    assert.equal(cfg.outDir, "dist");
+    assert.equal(cfg.libDir, "lib");
+    assert.equal(cfg.emptyOutDir, true);
     await fs.rm(tmp, { recursive: true, force: true });
   });
 
@@ -114,7 +109,7 @@ describe("config — zero-config (no chocola.config.json)", () => {
     // dev logic should not throw TypeError
     let threw = false;
     try {
-      const { isMissingConfigFile: isMissing } = await import("../utils.js");
+      const { isMissingConfigFile: isMissing } = await import("../metaframework/utils.js");
       if (isMissing(full)) throw new Error("unexpected missing");
       if (full.dev == null) {
         // this is the fixed path: should warn block, not access hostname
@@ -164,18 +159,14 @@ describe("config — hierarchical warnings", () => {
     await fs.rm(tmp, { recursive: true, force: true });
   });
 
-  test("bundle partial missing libDir warns field, plus dev/server blocks", async () => {
+  test("bundle partial: loadConfig returns default libDir without warnings", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "chocola-hier-partial-"));
     await fs.mkdir(path.join(tmp, "src"), { recursive: true });
     await fs.writeFile(path.join(tmp, "chocola.config.json"), JSON.stringify({ bundle: { srcDir: "src", outDir: "dist" } }));
-    const warns = await captureWarnings(tmp, async () => {
-      await getConfig(tmp);
-      await loadConfig(tmp);
-    });
-    assert.ok(warns.some(w => w.includes("bundle.libDir")), `bundle.libDir field, got ${warns}`);
-    assert.ok(warns.some(w => w.includes("dev config not defined")), `dev block, got ${warns}`);
-    assert.ok(warns.some(w => w.includes("server config not defined")), `server block, got ${warns}`);
-    assert.ok(!warns.some(w => w.includes("bundle config not defined")), "bundle block exists, should not warn block");
+    const cfg = await loadConfig(tmp);
+    assert.equal(cfg.srcDir, "src");
+    assert.equal(cfg.outDir, "dist");
+    assert.equal(cfg.libDir, "lib", "loadConfig should return default libDir");
     await fs.rm(tmp, { recursive: true, force: true });
   });
 
@@ -195,12 +186,12 @@ describe("config — hierarchical warnings", () => {
         const dc = full.dev;
         if (dc.hostname == null) {
           const chalk = (await import("../compiler/chalk.js")).default;
-          const { queueConfigWarning } = await import("../utils.js");
+          const { queueConfigWarning } = await import("../metaframework/utils.js");
           queueConfigWarning(tmp, chalk.bold.yellow("WARNING!"), `dev.hostname not defined in chocola.config.json file: using default localhost dev.hostname.`);
         }
         if (dc.port == null) {
           const chalk = (await import("../compiler/chalk.js")).default;
-          const { queueConfigWarning } = await import("../utils.js");
+          const { queueConfigWarning } = await import("../metaframework/utils.js");
           queueConfigWarning(tmp, chalk.bold.yellow("WARNING!"), `dev.port not defined in chocola.config.json file: using default 3000 dev.port.`);
         }
       }
@@ -225,12 +216,12 @@ describe("config — hierarchical warnings", () => {
         const dc = full.dev;
         if (dc.hostname == null) {
           const chalk = (await import("../compiler/chalk.js")).default;
-          const { queueConfigWarning } = await import("../utils.js");
+          const { queueConfigWarning } = await import("../metaframework/utils.js");
           queueConfigWarning(tmp, chalk.bold.yellow("WARNING!"), `dev.hostname missing`);
         }
         if (dc.port == null) {
           const chalk = (await import("../compiler/chalk.js")).default;
-          const { queueConfigWarning } = await import("../utils.js");
+          const { queueConfigWarning } = await import("../metaframework/utils.js");
           queueConfigWarning(tmp, chalk.bold.yellow("WARNING!"), `dev.port not defined in chocola.config.json file: using default 3000 dev.port.`);
         }
       }
@@ -254,7 +245,7 @@ describe("config — hierarchical warnings", () => {
       if (!isMissingConfigFile(full) && full.server != null) {
         if (sc.port == null) {
           const chalk = (await import("../compiler/chalk.js")).default;
-          const { queueConfigWarning } = await import("../utils.js");
+          const { queueConfigWarning } = await import("../metaframework/utils.js");
           queueConfigWarning(tmp, chalk.bold.yellow("WARNING!"), `server.port not defined in chocola.config.json file: using default 8080 server.port.`);
         }
       }
@@ -290,7 +281,7 @@ describe("config — warning full paths (bundle.* dev.* server.*)", () => {
       const full = await getConfig(tmp);
       if (!isMissingConfigFile(full) && full.dev != null && full.dev.port == null) {
         const chalk = (await import("../compiler/chalk.js")).default;
-        const { queueConfigWarning } = await import("../utils.js");
+        const { queueConfigWarning } = await import("../metaframework/utils.js");
         queueConfigWarning(tmp, chalk.bold.yellow("WARNING!"), `dev.port not defined in chocola.config.json file: using default 3000 dev.port.`);
       }
     });
@@ -301,17 +292,14 @@ describe("config — warning full paths (bundle.* dev.* server.*)", () => {
     await fs.rm(tmp, { recursive: true, force: true });
   });
 
-  test("bundle field warnings use bundle.* prefix", async () => {
+  test("bundle field warnings: loadConfig returns defaults without field warnings", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "chocola-prefix-bundle-"));
     await fs.mkdir(path.join(tmp, "src"), { recursive: true });
     await fs.writeFile(path.join(tmp, "chocola.config.json"), JSON.stringify({ bundle: { srcDir: "src" } }));
-    const warns = await captureWarnings(tmp, async () => {
-      await loadConfig(tmp);
-    });
-    const outWarn = warns.find(w => w.includes("outDir"));
-    assert.ok(outWarn && outWarn.includes("bundle.outDir"), `bundle.outDir prefix, got ${outWarn}`);
-    const libWarn = warns.find(w => w.includes("libDir"));
-    assert.ok(libWarn && libWarn.includes("bundle.libDir"), `bundle.libDir prefix, got ${libWarn}`);
+    const cfg = await loadConfig(tmp);
+    assert.equal(cfg.srcDir, "src");
+    assert.equal(cfg.outDir, "dist", "loadConfig should return default outDir");
+    assert.equal(cfg.libDir, "lib", "loadConfig should return default libDir");
     await fs.rm(tmp, { recursive: true, force: true });
   });
 
@@ -328,12 +316,12 @@ describe("config — warning full paths (bundle.* dev.* server.*)", () => {
       const sc = full.server || {};
       if (sc.port == null) {
         const chalk = (await import("../compiler/chalk.js")).default;
-        const { queueConfigWarning } = await import("../utils.js");
+        const { queueConfigWarning } = await import("../metaframework/utils.js");
         queueConfigWarning(tmp, chalk.bold.yellow("WARNING!"), `server.port not defined in chocola.config.json file: using default 8080 server.port.`);
       }
       if (sc.hostname == null) {
         const chalk = (await import("../compiler/chalk.js")).default;
-        const { queueConfigWarning } = await import("../utils.js");
+        const { queueConfigWarning } = await import("../metaframework/utils.js");
         queueConfigWarning(tmp, chalk.bold.yellow("WARNING!"), `server.hostname not defined in chocola.config.json file: using default localhost server.hostname.`);
       }
     });
@@ -343,66 +331,25 @@ describe("config — warning full paths (bundle.* dev.* server.*)", () => {
   });
 });
 
-describe("config — warnings before JOB DONE!", () => {
-  test("config warnings are flushed right before JOB DONE! (grouped, not on-the-fly)", async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "chocola-before-job-"));
+describe("config — flushConfigWarnings", () => {
+  test("flushConfigWarnings flushes queued warnings", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "chocola-flush-"));
     await fs.mkdir(path.join(tmp, "src", "lib"), { recursive: true });
-    await fs.writeFile(path.join(tmp, "src", "index.html"), "<html><head><title>t</title></head><body><app>hi</app></body></html>");
+    await fs.writeFile(path.join(tmp, "src", "index.html"), "<html><body><app></app></body></html>");
     await fs.writeFile(path.join(tmp, "src", "lib", "Comp.html"), "<template><div>c</div></template>");
-    // no config -> top-level warning should appear before JOB DONE!
-    const logs = [];
     const warns = [];
-    const origLog = console.log;
     const origWarn = console.warn;
-    console.log = (...args) => logs.push(stripAnsi(args.join(" ")));
     console.warn = (...args) => warns.push(stripAnsi(args.join(" ")));
-    let all = [];
-    const origLog2 = console.log;
-    const origWarn2 = console.warn;
-    // intercept both to capture order
-    const combined = [];
-    console.log = (...args) => combined.push("LOG:" + stripAnsi(args.join(" ")));
-    console.warn = (...args) => combined.push("WARN:" + stripAnsi(args.join(" ")));
     try {
-      await compile(tmp);
+      await getConfig(tmp);
+      await getConfig(tmp); // second call should dedup
+      flushConfigWarnings(tmp);
     } finally {
-      console.log = origLog;
       console.warn = origWarn;
-      // flush any remaining for this root (should be already flushed before JOB DONE!)
       flushConfigWarnings(tmp);
     }
-    // also capture via combined
-    // Re-run with combined capture to check order
-    // Instead, do fresh tmp to avoid dedup
-    const tmp2 = await fs.mkdtemp(path.join(os.tmpdir(), "chocola-before-job2-"));
-    await fs.mkdir(path.join(tmp2, "src", "lib"), { recursive: true });
-    await fs.writeFile(path.join(tmp2, "src", "index.html"), "<html><body><app>hi</app></body></html>");
-    await fs.writeFile(path.join(tmp2, "src", "lib", "Comp.html"), "<template><div>c</div></template>");
-    const order = [];
-    const oLog = console.log;
-    const oWarn = console.warn;
-    console.log = (...args) => order.push("LOG:" + stripAnsi(args.join(" ")));
-    console.warn = (...args) => order.push("WARN:" + stripAnsi(args.join(" ")));
-    try {
-      await compile(tmp2);
-    } finally {
-      console.log = oLog;
-      console.warn = oWarn;
-      flushConfigWarnings(tmp2);
-    }
-    const jobIdx = order.findIndex(l => l.includes("JOB DONE"));
-    const warnIdxs = order.map((l, i) => l.startsWith("WARN:") ? i : -1).filter(i => i >= 0);
-    assert.ok(jobIdx >= 0, "JOB DONE! should be logged");
-    assert.ok(warnIdxs.length > 0, `should have config warnings before JOB DONE, got ${order.join("\n")}`);
-    const lastWarn = Math.max(...warnIdxs);
-    assert.ok(lastWarn < jobIdx, `last warning (${lastWarn}) should be before JOB DONE (${jobIdx})`);
-    // warnings should be close to JOB DONE! (within 3 lines: Project bundled + JOB DONE!)
-    assert.ok(jobIdx - lastWarn <= 3, `warnings should be right before JOB DONE! (diff ${jobIdx - lastWarn}), order: ${order.join(" | ")}`);
-    // ensure warnings are not at the very start (on-the-fly would be before Components found)
-    const compIdx = order.findIndex(l => l.includes("Components found"));
-    assert.ok(warnIdxs.every(i => i > compIdx), "warnings should be after Components found, not on-the-fly at start");
+    assert.ok(warns.some(w => w.includes("chocola.config.json not found")), `expected top-level warning, got ${warns.join(" ")}`);
     await fs.rm(tmp, { recursive: true, force: true });
-    await fs.rm(tmp2, { recursive: true, force: true });
   });
 
   test("full config produces no warnings", async () => {

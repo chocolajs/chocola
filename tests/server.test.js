@@ -7,7 +7,7 @@ import http from "http";
 import zlib from "zlib";
 import { fileURLToPath } from "url";
 
-import { createHandler, createServer, serve } from "../server/index.js";
+import { createHandler, createServer, serve } from "../metaframework/server/index.js";
 import { deterministicHash } from "../compiler/utils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

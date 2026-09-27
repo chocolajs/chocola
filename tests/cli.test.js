@@ -7,7 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CLI = path.join(__dirname, "..", "bin", "chocola.js");
+const CLI = path.join(__dirname, "..", "metaframework", "bin", "chocola.js");
 const FIXTURE_BASIC = path.join(__dirname, "fixtures", "basic");
 
 function stripAnsi(s) {
