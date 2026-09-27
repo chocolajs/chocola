@@ -22,7 +22,7 @@
   "license": "MIT",
   "author": "SadGabi",
   "type": "module",
-  "main": "index.js",
+  "main": "compiler/index.js",
   "funding": {
     "type": "github",
     "url": "https://github.com/sponsors/chocolajs"
@@ -33,21 +33,24 @@
     "bench:csv": "node bench/index.js --csv"
   },
   "exports": {
+    ".": {
+      "import": "./compiler/index.js",
+      "require": "./compiler/index.js"
+    },
     "./compiler": "./compiler/index.js",
-    "./dev": "./dev/index.js",
-    "./server": "./server/index.js"
+    "./compiler/*": "./compiler/*",
+    "./runtime": "./runtime/index.js",
+    "./parser": "./parser/index.js",
+    "./parser/*": "./parser/*"
   },
   "bin": {
-    "chocola": "./bin/chocola.js",
-    "chjs": "./bin/chocola.js"
+    "chocola": "metaframework/bin/chocola.js",
+    "chjs": "metaframework/bin/chocola.js"
   },
   "files": [
-    "bin/",
     "compiler/",
-    "dev/",
-    "server/",
-    "runtime/",
     "parser/",
+    "runtime/",
     "utils.js"
   ],
   "dependencies": {

@@ -1,56 +1,13 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { performance } from "perf_hooks";
-import chalk from "./chalk.js";
 import { buildModuleGraph } from "./module-graph.js";
 import { renderPage } from "./render.js";
 import { writeHTMLOutput } from "./dom-processor.js";
-import { flushConfigWarnings } from "../utils.js";
 
 export { buildModuleGraph } from "./module-graph.js";
 export { renderPage } from "./render.js";
 export { ChocolaModule, ModuleGraph } from "./module-graph.js";
-
-const GOLD_COLOR = "#D87416";
-const WHITE_COLOR = "#FAFAF8";
-const TEXT_FAINT = "#E7EBE1";
-
-export function logBanner() {
-  const plain = process.env.NO_COLOR === "1";
-  const ch = plain ? (() => (s) => s) : chalk;
-  console.log(
-    ch.hex(GOLD_COLOR)(`
-    ┌─────────────────────────────────────────────┐
-    │┌-------------------------------------------┐│
-    ││                                           ││`)
-  );
-  console.log(
-    ch.hex(GOLD_COLOR)(`    ││            `) +
-    ch.bold.hex(WHITE_COLOR)(`{`) +
-    ch.bold.hex(GOLD_COLOR)(`  C H O C O L A  `) +
-    ch.bold.hex(WHITE_COLOR)(`}`) +
-    ch.hex(GOLD_COLOR)(`            ││\n`) +
-    ch.hex(GOLD_COLOR)(`    ││                                           ││
-    ││     `) +
-    ch.hex(TEXT_FAINT)(`THE SWEETEST WAY TO BUILD THE WEB`) +
-    ch.hex(GOLD_COLOR)(`     ││
-    ││                                           ││
-    │└-------------------------------------------┘│
-    └─────────────────────────────────────────────┘
-    `)
-  );
-}
-
-function logSuccess(outDirPath, durationMs) {
-  const plain = process.env.NO_COLOR === "1";
-  const ch = plain ? (() => (s) => s) : chalk;
-  console.log(ch.bold.green(`\nJOB DONE!`) + ch.hex(TEXT_FAINT)(` (${formatDuration(durationMs)})\n`));
-}
-
-function formatDuration(ms) {
-  if (ms >= 1000) return (ms / 1000).toFixed(2) + "s";
-  return Math.round(ms) + "ms";
-}
 
 async function setupOutputDirectory(outDirPath, emptyOutDir) {
   if (emptyOutDir) {
@@ -86,49 +43,19 @@ export async function emit(graph, options = {}) {
   return result;
 }
 
-export default async function compile(rootDir, buildConfig) {
+export default async function compile(rootDir, buildConfig = {}) {
   const isHotReload = buildConfig?.isHotReload || null;
   const overrides = buildConfig?.overrides || null;
+  const silent = buildConfig?.silent || false;
   const startTime = performance.now();
-  !isHotReload && logBanner();
 
   const graph = await buildModuleGraph(rootDir, { overrides });
-
-  !isHotReload && console.log(chalk.bold.green(">"), "Creating Chocola static build in directory", chalk.green.underline(graph.paths.outDir));
 
   await emit(graph);
 
   const durationMs = performance.now() - startTime;
-
-  if (!isHotReload) {
-    flushConfigWarnings(rootDir);
-    logSuccess(graph.paths.outDir, durationMs);
-  }
-  if (isHotReload) {
-    flushConfigWarnings(rootDir);
-    console.log("Dev server updated " + chalk.hex(TEXT_FAINT)(`(${formatDuration(durationMs)})`));
-  }
 }
 
-/**
- * An intrinsic object that contains the Chocola App methods.
- */
 export const app = {
-  /**
- *  Initializes your Chocola App using a root directory.
- * 
- * ```js
- * import { app } from "chocola/compiler"
-  import path from "path";
-  import { fileURLToPath } from "url";
-  
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  
-  app.build(__dirname);
-  ```
- * @example
- * @param {PathLike} __rootdir the directory where your Chocola App is
- */
   async build(__rootdir) { return compile(__rootdir) }
 };

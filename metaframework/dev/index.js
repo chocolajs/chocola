@@ -1,9 +1,9 @@
 import http from "http";
 import fs from "fs";
 import path from "path";
-import chalk from "../compiler/chalk.js";
-import compile from "../compiler/index.js";
-import { loadConfig, resolvePaths } from "../compiler/config.js";
+import chalk from "../../compiler/chalk.js";
+import compile from "../../compiler/index.js";
+import { loadConfig, resolvePaths } from "../../compiler/config.js";
 import { getConfig, isMissingConfigFile, queueConfigWarning } from "../utils.js";
 
 const warnedDevHostname = new Set();
@@ -140,24 +140,24 @@ export async function serve(__rootdir, { silent = false, port: cliPort, hostname
       } else {
         if (extname === ".html" || extname === ".htm") {
           const hotReloadScript = `
-<script>
-(function() {
-  let lastBuildTime = ${lastBuildTime};
-  setInterval(async () => {
-    try {
-      const res = await fetch('/api/hot-reload');
-      const data = await res.json();
-      if (data.buildTime > lastBuildTime) {
-        lastBuildTime = data.buildTime;
-        console.log('[Hot Reload] Changes detected, reloading...');
-        window.location.reload();
-      }
-    } catch (e) {
-      console.error('[Hot Reload] Check failed:', e);
-    }
-  }, 1000);
-})();
-</script>`;
+ <script>
+ (function() {
+   let lastBuildTime = ${lastBuildTime};
+   setInterval(async () => {
+     try {
+       const res = await fetch('/api/hot-reload');
+       const data = await res.json();
+       if (data.buildTime > lastBuildTime) {
+         lastBuildTime = data.buildTime;
+         console.log('[Hot Reload] Changes detected, reloading...');
+         window.location.reload();
+       }
+     } catch (e) {
+       console.error('[Hot Reload] Check failed:', e);
+     }
+   }, 1000);
+ })();
+ </script>`;
           const htmlWithReload = content.toString().replace('</body>', hotReloadScript + '</body>');
           res.writeHead(200, { "Content-Type": contentType });
           res.end(htmlWithReload, "utf-8");
@@ -191,20 +191,20 @@ server.listen(__config.port, __config.hostname, async () => {
  */
 export const dev = {
   /**
-*  Initializes your Chocola dev server using a root directory.
-* 
-* ```js
-* import { app } from "chocola/compiler"
-import path from "path";
-import { fileURLToPath } from "url";
- 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
- 
-app.build(__dirname);
-```
-* @example
-* @param {PathLike} __rootdir the directory where your Chocola App is
-*/
+ *  Initializes your Chocola dev server using a root directory.
+ * 
+ * ```js
+ * import { app } from "chocola/compiler"
+ import path from "path";
+ import { fileURLToPath } from "url";
+  
+ const __filename = fileURLToPath(import.meta.url);
+ const __dirname = path.dirname(__filename);
+  
+ app.build(__dirname);
+ ```
+ * @example
+ * @param {PathLike} __rootdir the directory where your Chocola App is
+ */
   async server(__rootdir) { return serve(__rootdir) }
 };

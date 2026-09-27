@@ -1,0 +1,26 @@
+{
+  "name": "chocola-metaframework",
+  "version": "2.0.0-next.12",
+  "description": "The metaframework layer for Chocola — dev server, CLI, and SSR server",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "chocola": "./bin/chocola.js",
+    "chjs": "./bin/chocola.js"
+  },
+  "exports": {
+    "./dev": "./dev/index.js",
+    "./server": "./server/index.js",
+    "./utils": "./utils.js",
+    "./bin/*": "./bin/*"
+  },
+  "files": [
+    "dev/",
+    "server/",
+    "bin/",
+    "utils.js"
+  ],
+  "dependencies": {
+    "chocola": "^2.0.0-next.12"
+  }
+}

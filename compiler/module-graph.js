@@ -1,7 +1,6 @@
 import path from "path";
 import { promises as fs } from "fs";
 import { parseHTML } from "linkedom";
-import chalk from "./chalk.js";
 import { loadConfig, resolvePaths } from "./config.js";
 import { getComponents, getSrcIndex } from "./pipeline.js";
 import { protectCurlyBraces } from "../utils.js";
@@ -215,14 +214,6 @@ export async function buildModuleGraph(rootDir, { overrides } = {}) {
 
   const foundComponents = await getComponents(paths.components);
   const { loadedComponents, originalNames, componentsLib, emptyComps } = foundComponents;
-
-  console.log(chalk.bold.green(">"), "Components found in", chalk.green.underline(paths.components) + ":");
-  console.log("   ", componentsLib, "\n\n");
-
-  if (emptyComps?.length > 0) {
-    console.warn(chalk.bold.yellow("WARNING!"), "The following component files are empty:");
-    console.log("   ", emptyComps);
-  }
 
   for (const filename of componentsLib) {
     const compName = filename.toLowerCase();

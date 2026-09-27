@@ -74,7 +74,7 @@ Ensure you have [npm](https://nodejs.org/es/download/current) installed. After c
 
 Once set, run `npm pack` to build a node package and test it in any project.
 
-Test the CLI with `node ./bin/chocola.js --help`.
+Test the CLI with `node ./metaframework/bin/chocola.js --help`.
 
 ### Creating a branch
 

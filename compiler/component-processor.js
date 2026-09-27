@@ -8,9 +8,6 @@ import {
   reservedAttrs, validateChainStructure, applyConditionalToElement, interpolateNode,
   scopeCss, compileExpr, evaluateConstant,
 } from "../parser/index.js";
-import chalk from "./chalk.js";
-
-
 
 class ProcessContext {
   constructor(loadedComponents, runtimeChunks, compIdColl, runtimeMap, cssScopes, cssScopesMap, scopedStyles, staticCtxRegistry, csrClasses, treeShakeRuntime = true, originalNames = null) {
@@ -112,7 +109,6 @@ function generateCSRClass(compName, cx, explicitClassName) {
     reach = computeReachable(parsedForReach, { bindings: [...bindVarNames] });
     if (reach.fallback) {
       // conservative: include all and warn
-      console.warn(chalk.yellow(`WARN ${displayName} — dynamic $runtime, including all declarations`));
     }
   }
   const injectedNames = new Set(compProps.map(p => p.name));
@@ -297,8 +293,7 @@ export function processComponentElement(
   let template = doc.querySelector("template")?.innerHTML;
   let styles = doc.querySelector("style")?.innerHTML;
 
-  if (!template) {
-    console.warn(chalk.yellow(`${displayName} — component is missing a <template>`));
+   if (!template) {
     return false;
   }
 
@@ -324,7 +319,6 @@ export function processComponentElement(
       for (const imp of importsToGenerate) {
         const isComponent = imp.source.toLowerCase().endsWith(".html");
         if (!isComponent) {
-          console.warn(chalk.yellow(`WARN ${displayName} — JS import "${imp.source}" is client-reachable but not bundled (Phase 1: dropping)`));
           continue;
         }
         const importedCompName = path.basename(imp.source).toLowerCase();
@@ -674,9 +668,8 @@ export function processComponentElement(
             if (parsedReach.ast) {
               const bindNames = bindings.map(b => b.varName);
               reachInject = computeReachable(parsedReach, { bindings: bindNames });
-              if (reachInject.fallback) {
-                console.warn(chalk.yellow(`WARN ${displayName} — dynamic $runtime, including all declarations`));
-                reachInject = null;
+               if (reachInject.fallback) {
+                 reachInject = null;
               }
             }
           }
