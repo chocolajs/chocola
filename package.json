@@ -43,10 +43,6 @@
     "./parser": "./parser/index.js",
     "./parser/*": "./parser/*"
   },
-  "bin": {
-    "chocola": "metaframework/bin/chocola.js",
-    "chjs": "metaframework/bin/chocola.js"
-  },
   "files": [
     "compiler/",
     "parser/",
