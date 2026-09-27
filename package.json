@@ -38,8 +38,10 @@
       "require": "./compiler/index.js"
     },
     "./compiler": "./compiler/index.js",
+    "./compiler/*": "./compiler/*",
     "./runtime": "./runtime/index.js",
-    "./parser": "./parser/index.js"
+    "./parser": "./parser/index.js",
+    "./parser/*": "./parser/*"
   },
   "bin": {
     "chocola": "metaframework/bin/chocola.js",
@@ -49,8 +51,7 @@
     "compiler/",
     "parser/",
     "runtime/",
-    "utils.js",
-    "metaframework/"
+    "utils.js"
   ],
   "dependencies": {
     "acorn": "^8.18.0",

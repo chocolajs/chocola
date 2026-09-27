@@ -5,7 +5,6 @@ import { createRequire } from "module";
 import { readFile } from "fs/promises";
 import { getConfig, isMissingConfigFile } from "../utils.js";
 import { loadConfig } from "../../compiler/config.js";
-
 import chalk from "../../compiler/chalk.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -189,7 +188,7 @@ export async function main() {
       case "dev": {
         const local = await getLocalModules(rootDir);
         const devMod = local
-          ? await import(pathToFileURL(path.join(local.rootDir, "dev/index.js")).href)
+          ? await import(pathToFileURL(path.join(local.rootDir, "metaframework/dev/index.js")).href)
           : await import("../dev/index.js");
         const serve = devMod.serve || devMod.default;
         serverInstance = await serve(rootDir, {
@@ -204,7 +203,7 @@ export async function main() {
       case "serve": {
         const local = await getLocalModules(rootDir);
         const serverMod = local
-          ? await import(pathToFileURL(path.join(local.rootDir, "server/index.js")).href)
+          ? await import(pathToFileURL(path.join(local.rootDir, "metaframework/server/index.js")).href)
           : await import("../server/index.js");
         const serve = serverMod.serve || serverMod.default?.serve;
         serverInstance = await serve(rootDir, {

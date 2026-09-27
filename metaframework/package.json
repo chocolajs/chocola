@@ -10,7 +10,9 @@
   },
   "exports": {
     "./dev": "./dev/index.js",
-    "./server": "./server/index.js"
+    "./server": "./server/index.js",
+    "./utils": "./utils.js",
+    "./bin/*": "./bin/*"
   },
   "files": [
     "dev/",
@@ -19,6 +21,6 @@
     "utils.js"
   ],
   "dependencies": {
-    "chocola": "file:.."
+    "chocola": "^2.0.0-next.12"
   }
 }

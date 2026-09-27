@@ -16,7 +16,6 @@ export function queueConfigWarning(rootDir, ...args) {
 }
 
 export function flushConfigWarnings(rootDir) {
-  // if rootDir provided, flush only that dir; if not, flush all (fallback)
   if (rootDir) {
     const buf = configWarningBuffers.get(rootDir);
     if (!buf || !buf.length) return;
@@ -42,7 +41,6 @@ export async function getConfig(__rootdir, { silent } = {}) {
         const raw = await fs.readFile(path.join(__rootdir, "chocola.config.json"), "utf-8");
         const config = JSON.parse(raw);
 
-        // Hierarchical block-level warnings: if file exists but block missing, warn per missing block
         const hasBundle = (config.bundle !== undefined && config.bundle !== null) || (config.build !== undefined && config.build !== null);
         const hasDev = config.dev !== undefined && config.dev !== null;
         const hasServer = config.server !== undefined && config.server !== null;

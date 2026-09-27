@@ -9,3 +9,11 @@ When submitting a PR, you **MUST** read [`PULL_REQUEST_TEMPLATE.md`](./.github/P
 ## Quick Reference
 
 If asked to do a performance investigation, use the `performance-investigation` skill.
+
+## Project Structure
+
+- **Core library**: `compiler/`, `parser/`, `runtime/`, `utils.js` — consumable by any stack (Vite, Next.js, etc.)
+- **Metaframework**: `metaframework/dev/`, `metaframework/server/`, `metaframework/bin/`, `metaframework/utils.js` — dev server, CLI, SSR server
+- **Tests**: `tests/*.test.js` — run with `npm test`
+- **Bench**: `bench/` — run with `npm run bench`
+- **CLI**: `node metaframework/bin/chocola.js --help`
