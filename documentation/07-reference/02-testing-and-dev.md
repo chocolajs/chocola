@@ -55,7 +55,7 @@ Middleware is an ESM file with a default export of `Array | Function | Object` s
 npm test
 ```
 
-Runs `node --test "tests/**/*.test.js"` (compiler + SSR server, ~27 tests) covering graph discovery, pure `renderPage`, `emit`, stable ids, routes, props/middleware merging, static/ETag/gzip, and `createHandler` usage. See `CONTRIBUTING.md`.
+Runs `node --test "tests/**/*.test.js"` (84 tests across compiler, config, parser, pipeline, runtime, and utils suites) covering graph discovery, pure `renderPage`, `emit`, stable ids, per-request `ctx`, `loadConfig`/overrides, parser helpers, pipeline assets, `ChocolaComponent` mount/update/remove, and brace utilities. See `CONTRIBUTING.md`.
 
 ## Benchmarks
 
