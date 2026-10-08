@@ -17,14 +17,7 @@ Components can have runtime logic that runs once the component is rendered. This
 
 ## Context
 
-The runtime function receives access to component data and DOM elements through injected variables:
-
-- `self` — the root DOM element of the component.
-- `ctx` — contains props and other dynamic values.
-
-> You don't declare `self` and `ctx` as parameters — they are injected automatically at compile-time.
-
-### Example with `self`
+The runtime function receives access to component data and DOM elements. Use `self` as the root DOM element of the component.
 
 ```html
 <script>
@@ -46,28 +39,6 @@ The runtime function receives access to component data and DOM elements through 
     <div id="number">{count}</div>
 </template>
 ```
-
-## Top-Level Variables
-
-You can declare `let` or `const` variables at the top level of `<script>`. They are included in the component's context, so they're available in template bindings and inside `$runtime`:
-
-```html
-<script>
-    let log = "Hi";
-    const price = 42;
-
-    function $runtime() {
-        console.log(log); // "Hi"
-        self.querySelector(".price").textContent = price;
-    }
-</script>
-
-<template>
-    <p class="price">{log}: {price}</p>
-</template>
-```
-
-Top-level variables are scoped to the component and won't leak. A parent-passed attribute with the same name takes precedence over the declared value.
 
 ## Top-Level Functions and Variables
 
@@ -102,6 +73,6 @@ This keeps your runtime logic clean by extracting reusable logic into named func
 
 ## Best Practices
 
-- Always manipulate elements inside `self` to prevent conflicts when multiple instances of a component are rendered.
+- Always manipulate elements inside `self` instead of `document` to prevent conflicts when multiple instances of a component are rendered.
 - Use `$runtime` to store state that persists across renders.
 - Avoid manipulating the global `document` directly inside component scripts.

@@ -18,14 +18,13 @@ The process starts at the entry point and then moves through eight stages. Each 
 
 ## Entry point
 
-The compiler can be used from three public entry points depending on the workflow. For a static build you call the build function with a project directory. For local development you start the dev server, which adds hot reload on top of the same pipeline. For production server rendering you create a request handler that reuses the compiled graph. Each of these is a thin wrapper which then delegates to the internal pipeline described below.
+The compiler exposes one static-build entry point plus the pipeline stages for hosts to compose. `app.build(rootDir)` compiles a project directory to a static site. Hosts (ChocolaKit's dev/SSR servers, Vite plugins, custom Node tooling) compose `buildModuleGraph` + `renderPage` + `emit` directly. Each of these delegates to the internal pipeline described below.
 
 #### How it works
 
-* The static build is exposed as `app.build` from `chocola/compiler`. This function is implemented in `compiler/index.js` and it orchestrates the full pipeline.
-* For advanced use the same package also exports `buildModuleGraph` and `renderPage` and `emit`. These let you run graph building and rendering separately.
-* The dev entry point is `dev.server` from `chocola/dev`. It wraps the compiler with a file watcher.
-* The SSR entry point is `createHandler` and `createServer` and `serve` from `chocola/server`. These are implemented in `server/index.js`. See also the [Output](#8-output) section and the SSR server documentation.
+* The static build is exposed as `app.build` (and `compile`) from `chocola/compiler`. These functions are implemented in `compiler/index.js` and they orchestrate the full pipeline: `emit(await buildModuleGraph(rootDir))`.
+* The same package also exports `buildModuleGraph`, `renderPage`, `emit`, `ChocolaModule`, and `ModuleGraph`. These let you run graph building, per-request rendering, and output separately.
+* Per-request rendering is `renderPage(graph, ctx)` — a pure function returning `{ html, hashMap, files, copies }` without touching disk. Hosts build `ctx` (e.g. from query params and middleware) and serve the returned virtual assets themselves. See also the [Output](#8-output) section and [Per-request rendering](02-ssr-server.md).
 
 ## Compilation Pipeline
 
@@ -35,7 +34,7 @@ This stage loads project settings so the rest of the pipeline knows where to fin
 
 #### How it works
 
-The settings are read from `chocola.config.json` in the project root. This is handled by `loadConfig` in `compiler/config.js`, which uses helpers in `utils.js` to read the file.
+The settings are read from `chocola.config.json` in the project root. This is handled by `loadConfig` in `compiler/config.js`, which applies programmatic `overrides` on top of file values and falls back to defaults when the file is absent.
 
 If no config file is present, defaults are applied. The defaults include `srcDir` as `src`, `outDir` as `dist`, `libDir` as `lib` inside the source directory, and `emptyOutDir` as `true` to clean the output before a build.
 
@@ -174,7 +173,7 @@ Static assets are handled by `copyStaticDir` in `compiler/pipeline.js`, which st
 
 ### 8. Output
 
-This stage produces the final result that users see. For a static build it writes HTML and assets to disk. For server rendering it keeps the same data in memory so it can be served per request. In both cases it takes the rendered DOM and the collected file and copy descriptors as input.
+This stage produces the final result that users see. For a static build it writes HTML and assets to disk. For per-request rendering, hosts keep the same data in memory and serve it themselves. In both cases it takes the rendered DOM and the collected file and copy descriptors as input.
 
 #### How it works
 
@@ -184,7 +183,7 @@ During rendering, runtime `script` tags are appended to the document body via `a
 
 If `emptyOutDir` is enabled, `emit` clears the output directory first. After that it writes `index.html` and every collected CSS and JS file descriptor to the output directory. It then executes copy operations for icons and static assets, and writes the component hash map to `.chocola/hashes.json` for debugging reference.
 
-When running under `chocola/server`, the same data that `renderPage` returns, namely `html` and `files` and `copies` and `hashMap`, is used differently. Instead of writing to disk, the server keeps these virtual assets in memory and serves them with caching headers such as `ETag` and `Last-Modified` and with `gzip` compression, without touching the file system.
+Hosts doing per-request rendering use the same data that `renderPage` returns — namely `html`, `files`, `copies`, and `hashMap` — without writing to disk: they keep these virtual assets in memory and serve them with their own caching headers and compression.
 
 ## Data Flow Diagram
 
@@ -204,7 +203,7 @@ compiler/index.js
   ├─ runtime-generator.js → generateRuntimeScript — returns run-<hash>.js descriptors for the base class, CSR classes, and SSG calls
   └─ .chocola/hashes.json → component-to-hash reference map (written after build)
 
-server/index.js           → createHandler/createServer/serve — per-request renderPage(graph, ctx) with ETag/gzip, middleware, static serving
+hosts (e.g. ChocolaKit)   → per-request renderPage(graph, ctx); serve files/copies from memory
 ```
 
 ## Key Concepts

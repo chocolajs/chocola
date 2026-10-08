@@ -1,89 +1,80 @@
 ---
-title: SSR server
-description: Deployable server-side rendering with chocola/server
+title: Per-request rendering
+description: Render pages per request with the pure renderPage pipeline
 ---
 
-`chocola/server` renders pages per request by reusing the pure `renderPage(graph, ctx)` pipeline described in the compiler flow.
+`renderPage(graph, ctx)` is a pure function (no disk writes) that hosts call
+per request to render pages with request-time data. This is how ChocolaKit's
+SSR server — and any custom host — serves dynamic pages on top of this library.
 
 ## Summary
 
-The server flow is intentionally short and can be scanned in seconds. It builds the module graph once at startup, which is then used to serve every request.
-
-1. [Graph is built once at startup](#1-graph) and kept in memory without writing to disk.
-2. [Route table maps URLs to the page module](#2-route-table) so requests can be dispatched quickly.
-3. [Each request renders with renderPage](#3-per-request-render) using a context that merges query parameters and middleware results.
-4. [Virtual files are served from memory](#4-virtual-files) with caching and compression so assets are fast without touching disk.
+1. [Build the graph once at startup](#1-graph) and keep it in memory without writing to disk.
+2. [Map URLs to the page module](#2-route-table) so requests can be dispatched quickly.
+3. [Render each request with renderPage](#3-per-request-render) using a context built from the request.
+4. [Serve virtual files from memory](#4-virtual-files) with your own caching and compression.
 
 ## Usage
 
 ```js
-import { serve, createHandler } from "chocola/server";
+import { buildModuleGraph, renderPage } from "chocola/compiler";
 import http from "http";
 
-// honors chocola.config.json -> server.port / hostname / middleware
-serve(__dirname);
+const graph = await buildModuleGraph(rootDir);
 
-// or bare http handler
-const handler = await createHandler(__dirname);
+const handler = async (req, res) => {
+  const url = new URL(req.url, "http://localhost");
+  const ctx = Object.fromEntries(url.searchParams); // per-request props
+  const { html } = await renderPage(graph, ctx);
+  res.writeHead(200, { "Content-Type": "text/html" });
+  res.end(html);
+};
+
 http.createServer(handler).listen(8080);
 ```
 
-The export map is defined in `package.json` under the key `./server`, which points to `./server/index.js`. That module exposes `createHandler` and `createServer` as an alias, and `createServerRenderer` as an alias, along with `serve`.
+> The dev server, production SSR server, and CLI are ChocolaKit
+> (`@chocolajs/kit`), which wraps this pipeline. The pattern below is what any
+> host implements.
 
 ## How it works
 
 ### 1. Graph
 
-This step prepares all knowledge about pages and components before the server accepts any requests. It runs once at startup and the result is reused for every later render. This avoids repeated file system work and keeps per-request rendering pure.
-
-#### How it works
-
-The graph is created by `buildModuleGraph` in `compiler/module-graph.js`. This function is called with the project root directory. It performs discovery and parsing as described in the compiler flow, but it does not write any files.
+Build the module graph once at startup with `buildModuleGraph` in
+`compiler/module-graph.js`, called with the project root directory. It performs
+discovery and parsing as described in the compiler flow, but writes no files.
+The result is reused for every render.
 
 ### 2. Route table
 
-This step creates a small lookup that maps incoming URLs to the page module. It takes the graph as input and produces a table that the request handler can consult instantly. This keeps routing cheap and avoids route parsing on every request.
-
-#### How it works
-
-The server builds entries for the root path and for `index.html` and for `index`. Each of these is mapped to the same page module that was discovered during graph building. The table is held in memory alongside the graph.
+Build a small lookup mapping incoming URLs to the page module. The graph's
+`page` module (`index.html`) serves `/`, `/index.html`, and `/index`. Hold the
+table in memory alongside the graph.
 
 ### 3. Per-request render
 
-This step turns a single HTTP request into HTML. It takes query parameters and middleware results as input and produces rendered HTML plus asset descriptors. Because conditionals and interpolations are evaluated against this per-request context, the same page can vary per visitor.
+Turn a single request into HTML with `renderPage` in `compiler/render.js`,
+passing the shared graph and a context object named `ctx`.
 
-#### How it works
-
-Rendering is handled by `renderPage` in `compiler/render.js`. This function receives the shared graph and a context object named `ctx`.
-
-The context is built by merging three sources. First, query parameters from the URL. Second, objects returned by middleware. Third, any extra context passed via options under `opts.ctx`. Page and component conditionals such as `if` and `mount:if`, and prop interpolations of the form `{prop}`, are then evaluated against this merged context.
+Build `ctx` from request data — e.g. query parameters merged with middleware
+results and any extra host context. Page and component conditionals such as
+`if` and `mount:if`, and prop interpolations of the form `{prop}`, are
+evaluated against this merged context, so the same page can vary per visitor.
 
 ### 4. Virtual files
 
-This step serves supporting files without writing them to disk. It takes the file and copy descriptors returned by `renderPage` and serves them from memory with proper caching and compression. This makes asset delivery fast while keeping the file system clean.
+Serve supporting files without writing them to disk. `renderPage` returns two
+collections named `files` and `copies`: `files` holds generated assets such as
+scoped CSS and runtime scripts (hashed names `sc-*`, `run-*`, `css-*`, `js-*`);
+`copies` holds entries that would otherwise be copied from `src` and `static`.
 
-#### How it works
-
-Rendering returns two collections named `files` and `copies`. `files` holds generated assets such as scoped CSS files and runtime scripts. These use hashed names of the form `sc-*` for scoped styles and `run-*` for runtime and `css-*` for stylesheets and `js-*` for scripts. `copies` holds entries that would otherwise be copied from `src` and from `static` on disk.
-
-The server keeps these assets in memory. When a browser requests one, the response includes an `ETag` derived from a sha256 hash, along with `Last-Modified` and `Cache-Control` headers. If the request includes `If-None-Match` or `If-Modified-Since`, the server can return `304 Not Modified` without a body.
-
-Compression is also handled in memory. If the request advertises `gzip` via `Accept-Encoding`, the server gzips the response and adds a `Vary` header to indicate the encoding differs by request. This applies to the generated hashed files and to files served from `src` and `static`.
-
-## Middleware
-
-This feature lets you inject per-request data or short-circuit a request before rendering. Configuration comes from `chocola.config.json`, and the middleware module is loaded once at startup. This keeps request logic separate from page templates.
-
-#### How it works
-
-The config shape is as follows.
-
-```json
-{ "server": { "port": 8080, "hostname": "localhost", "middleware": "./middleware.js" } }
-```
-
-The middleware file is an ESM module with a default export that can be an array or a function or an object. Two function signatures are supported. The first receives `req` and `res` and may short-circuit the response, for example by calling `res.writeHead(401).end()` for authentication. The second receives an object with `params`, `query`, `cookies`, `headers`, `url`, `pathname`, `req` and `res`, and returns an object that is then merged into `ctx`. Both signatures may be mixed in an array. If the configured file is missing, startup throws an error.
+Keep these assets in memory and serve them with your own `ETag` /
+`Last-Modified` / `Cache-Control` handling, `304` responses for
+`If-None-Match` / `If-Modified-Since`, and `gzip` compression for compressible
+types.
 
 ## Limits (intentional)
 
-The server is designed to stay small and focused. It runs as a single process and does not provide dynamic route parameters. It also does not include body parsing or streaming, and it does not export a cache layer. These choices keep the implementation easy to reason about and fast for the targeted use case.
+The library stays transport-agnostic: single process, no routing, no body
+parsing, no streaming, no exported cache. Hosts own the HTTP layer.

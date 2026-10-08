@@ -7,7 +7,7 @@
 
 Chocola is a new and sweeter way to build your web apps.
 
-No bundler config. No virtual DOM. No hydration ceremony. Just `.html` files with `<template>`, `<script>`, and `<style>` compiled to HTML with scoped CSS the browser already understands, and optional runtime when you need it.
+Just `.html` files with `<template>`, `<script>`, and `<style>` compiled to HTML with scoped CSS the browser already understands, and optional runtime when you need it.
 
 Import components. Instantiate them. Mount, update, remove. Client-side or server-side. Same file, minimal overhead.
 
@@ -37,19 +37,26 @@ Import components. Instantiate them. Mount, update, remove. Client-side or serve
 </style>
 ```
 
+## Supporting Chocola
+
+As of now, Chocola is a project driven by one developer (me, [@sadgabi20](https://github.com/sadgabi20)), but made to be community driven in the future. Therefore, the only current way to support Chocola is via my [GitHub Sponsors](https://github.com/sponsors/sadgabi20).
+
+If this project achieves a wider support, it will have its own official support channels.
+
 ## Documentation
 
 - [Getting started](documentation/01-introduction/02-getting-started.md)
 - [Project structure](documentation/01-introduction/03-project-structure.md)
-- [CLI reference](documentation/07-reference/04-cli.md)
+- [Build API reference](documentation/07-reference/04-cli.md)
 
-## Quick start
+## Roadmap
 
-```sh
-npm install chocola
-npx chocola dev        # dev server
-npx chocola build      # production build
-npx chocola serve      # SSR production server
-```
+If you want to know what is being worked on right now, see the [Roadmap](ROADMAP.md).
 
-No init scripts required: `chocola.config.json` is optional. See [Getting started](documentation/01-introduction/02-getting-started.md) for more.
+## Contributing
+
+Please follow the [Contribution Guidelines](CONTRIBUTING.md) to know how to contribute to Chocola.
+
+## License
+
+[MIT](LICENSE)
