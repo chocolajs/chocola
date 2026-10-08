@@ -20,9 +20,9 @@ Introduces the `$` prefix.
 - [x] `bind:` DOM manipulation
 - [x] Deterministic hashing
 - [x] Declarative components imports
-- [ ] (**current development**) Implement real isomorphism ([RFC #2](https://github.com/chocolajs/rfcs/blob/main/text/0000-server-resolved-script-runtime.md): server-resolved logic)
+- [x] Implement real isomorphism ([RFC #2](https://github.com/chocolajs/rfcs/blob/main/text/0000-server-resolved-script-runtime.md): server-resolved logic)
+- [ ] (**current development**) `for:each` and `switch/case` directives
 - [ ] ESM modules and dependencies bundling
-- [ ] `for:each` and `switch/case` directives
 - [ ] `<as:html></as:html>` blocks for raw HTML injection
 - [ ] `style:<style>="{foo}"`, `class:<class>="{foo}"` and `<attribute>?="{foo}"` directives
 - [ ] `$debug(...data)` method to add dev logs that will be removed in final build and production mode
