@@ -11,17 +11,17 @@ Chocola is a small web framework that lets you build apps out of reusable compon
 
 ### How do I get a project up and running?
 
-Install Chocola with `npm install chocola`, then create `chocola.config.json` (optional — defaults are used if absent) and `src/index.html`. Use the CLI:
+Install Chocola with `npm install chocola`, then create `chocola.config.json` (optional — defaults are used if absent) and `src/index.html`. Build with the library API:
 
-```sh
-npx chocola dev        # dev server with HMR
-npx chocola build      # production build
-npx chocola serve      # SSR production server
+```js
+import { app } from "chocola/compiler";
+
+await app.build("./my-app");
 ```
 
 Your HTML entry point lives at `src/index.html`.
 
-Use the CLI for all operations: `npx chocola dev` for live-reloading dev, `npx chocola build` for production, `npx chocola serve` for SSR. For advanced use, programmatic APIs (`createHandler`, `serve`) are available from `chocola/server`.
+For a dev server with live reload, a production build CLI, or SSR serving, use ChocolaKit (`@chocolajs/kit`), which wraps this library. For custom hosts, compose the pipeline directly: `buildModuleGraph(rootDir)` + `renderPage(graph, ctx)` + `emit(graph)` from `chocola/compiler`.
 
 ### Why does my HTML need an `<app>` tag?
 
@@ -79,7 +79,7 @@ Add attributes to the component tag — those become props. Strings go in plain,
 <Counter label="Clicks" start={5} active={true}></Counter>
 ```
 
-Inside the component's `script`, you access those values through the `ctx` object: `ctx.label`, `ctx.start`, and so on.
+Inside the component's `<script>` and `$runtime`, those values are in scope by name (e.g. `label`, `start`); they are merged from defaults and the caller-supplied `ctx`.
 
 ### How do state and reactivity work?
 

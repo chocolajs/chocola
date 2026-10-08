@@ -74,7 +74,7 @@ Ensure you have [npm](https://nodejs.org/es/download/current) installed. After c
 
 Once set, run `npm pack` to build a node package and test it in any project.
 
-Test the CLI with `node ./metaframework/bin/chocola.js --help`.
+Try a build programmatically with `node -e "import('./compiler/index.js').then(m => m.app.build('.'))"` (dev server, SSR server, and CLI live in ChocolaKit, `@chocolajs/kit`, not in this repo).
 
 ### Creating a branch
 
