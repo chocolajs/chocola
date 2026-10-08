@@ -1,8 +1,13 @@
 # Chocola Core / Metaframework Separation Plan
 
-## Status: ✅ COMPLETED
+## Status: ✅ COMPLETED, then SUPERSEDED by ChocolaKit split
 
-All 54 tests pass across 13 test suites.
+The separation described below was implemented (#186), and afterwards the
+metaframework was removed from this repo entirely (#191). This repo now
+contains only the core library (`chocola`); the metaframework lives in its
+own repo as ChocolaKit (`@chocolajs/kit`). Treat the `metaframework/`
+sections below as historical — the core-library sections (pure compiler,
+`utils.js` split, `package.json` exports) still describe this repo.
 
 ## What Was Done
 
