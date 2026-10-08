@@ -11,6 +11,7 @@ Proof of concept for Chocola. It implemented the foundations of its core philoso
 Focus on production-readiness; hardening V1, giving components a proper file format and adding dynamic rendering.
 Introduces the `$` prefix.
 
+- [x] Splitted project in core library (Chocola) and metaframework ([ChocolaKit](https://github.com/chocolajs/kit))
 - [x] SFCs
 - [x] Imperative components API
 - [x] New `$runtime` function replacing `RUNTIME`
@@ -19,9 +20,7 @@ Introduces the `$` prefix.
 - [x] `bind:` DOM manipulation
 - [x] Deterministic hashing
 - [x] Declarative components imports
-- [x] Limited SSR (designed for using plugins and middleware for extensible production deployment); single process, no dynamic params/body parsing yet
 - [ ] (**current development**) Implement real isomorphism ([RFC #2](https://github.com/chocolajs/rfcs/blob/main/text/0000-server-resolved-script-runtime.md): server-resolved logic)
-- [ ] HMR dev server
 - [ ] ESM modules and dependencies bundling
 - [ ] `for:each` and `switch/case` directives
 - [ ] `<as:html></as:html>` blocks for raw HTML injection
@@ -34,11 +33,9 @@ Introduces the `$` prefix.
 
 The following changes are planned to be implemented in future releases once the V2 foundations are delivered:
 
-- [ ] SPA support
 - [ ] Reactivity with `${foo}` bindings
 - [ ] Global state and lifecycle hooks
 - [ ] `$bake` and `$cast` directives for fine-grained statefulness management
-- [x] Global portable CLI
 
 ---
 
