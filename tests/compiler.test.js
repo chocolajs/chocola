@@ -177,3 +177,97 @@ test("compile() is emit(buildModuleGraph())", async () => {
 
   assert.ok((await fs.readdir(outDir)).includes("index.html"), "compile should produce the static site");
 });
+
+test("app.build(rootDir) writes dist/index.html", async () => {
+  const outDir = path.join(tmpRoot, "dist");
+  await fs.rm(outDir, { recursive: true, force: true });
+
+  await app.build(tmpRoot);
+
+  const entries = await fs.readdir(outDir);
+  assert.ok(entries.includes("index.html"), "app.build should produce the static site");
+});
+
+test("compile(rootDir, { overrides }) forwards overrides", async () => {
+  const outDir = path.join(tmpRoot, "custom_out");
+  await fs.rm(outDir, { recursive: true, force: true });
+
+  await compile(tmpRoot, { overrides: { outDir: "custom_out" } });
+
+  assert.ok((await fs.readdir(outDir)).includes("index.html"), "overrides should redirect output");
+  await fs.rm(outDir, { recursive: true, force: true });
+});
+
+test("renderPage(graph, ctx) interpolates per-request props without writing", async () => {
+  const before = await listDir(path.join(tmpRoot, "dist"));
+  const result = await renderPage(graph, { greeting_extra: "Alice" });
+  const after = await listDir(path.join(tmpRoot, "dist"));
+
+  assert.deepEqual(after, before, "renderPage must not touch the output directory");
+  assert.ok(result.html.includes("Hello World!"), "literal element attrs win over ctx");
+});
+
+test("renderPage(graph, ctx) fills unbound names from ctx", async () => {
+  const tmpParent = await fs.mkdtemp(path.join(os.tmpdir(), "chocola-ctx-"));
+  const root = path.join(tmpParent, "app");
+  try {
+    await fs.mkdir(path.join(root, "src", "lib"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "src", "index.html"),
+      '<html><body><app><p if="{flag}">shown</p></app></body></html>'
+    );
+    const ctxGraph = await buildModuleGraph(root);
+    const on = await renderPage(ctxGraph, { flag: true });
+    assert.ok(on.html.includes("shown"));
+    assert.ok(!on.html.includes("display:none"));
+    const off = await renderPage(ctxGraph, { flag: false });
+    assert.ok(off.html.includes("display:none"));
+  } finally {
+    await fs.rm(tmpParent, { recursive: true, force: true });
+  }
+});
+
+test("emit(graph, { ctx }) forwards ctx into the written page", async () => {
+  const tmpParent = await fs.mkdtemp(path.join(os.tmpdir(), "chocola-emitctx-"));
+  const root = path.join(tmpParent, "app");
+  try {
+    await fs.mkdir(path.join(root, "src", "lib"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "src", "index.html"),
+      '<html><body><app><p if="{show}">visible</p></app></body></html>'
+    );
+    const ctxGraph = await buildModuleGraph(root);
+    await emit(ctxGraph, { ctx: { show: false } });
+    const html = await fs.readFile(path.join(root, "dist", "index.html"), "utf8");
+    assert.ok(html.includes("display:none"), "emit ctx should reach renderPage");
+  } finally {
+    await fs.rm(tmpParent, { recursive: true, force: true });
+  }
+});
+
+test("missing <app> container throws", async () => {
+  const tmpParent = await fs.mkdtemp(path.join(os.tmpdir(), "chocola-noapp-"));
+  const root = path.join(tmpParent, "app");
+  try {
+    await fs.mkdir(path.join(root, "src", "lib"), { recursive: true });
+    await fs.writeFile(path.join(root, "src", "index.html"), "<html><body><p>no app here</p></body></html>");
+    const badGraph = await buildModuleGraph(root);
+    await assert.rejects(() => renderPage(badGraph), /<app>/);
+  } finally {
+    await fs.rm(tmpParent, { recursive: true, force: true });
+  }
+});
+
+test("emptyOutDir: false preserves stray files", async () => {
+  const keepGraph = await buildModuleGraph(tmpRoot, { overrides: { emptyOutDir: false } });
+  const outDir = keepGraph.paths.outDir;
+  await fs.mkdir(outDir, { recursive: true });
+  await fs.writeFile(path.join(outDir, "keep.txt"), "keep me");
+
+  await emit(keepGraph);
+
+  const entries = await fs.readdir(outDir);
+  assert.ok(entries.includes("keep.txt"), "emptyOutDir: false should preserve existing output");
+  assert.ok(entries.includes("index.html"), "emit should still write the page");
+  await fs.rm(path.join(outDir, "keep.txt"), { force: true });
+});

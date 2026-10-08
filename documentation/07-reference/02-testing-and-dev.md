@@ -20,9 +20,7 @@ const { html } = await renderPage(graph, { name: "Ada" });
 npm test
 ```
 
-Runs `node --test "tests/**/*.test.js"` (compiler suite) covering graph
-discovery, pure `renderPage`, `emit`, stable ids, routes, and props merging.
-See `CONTRIBUTING.md`.
+Runs `node --test "tests/**/*.test.js"` (84 tests across compiler, config, parser, pipeline, runtime, and utils suites) covering graph discovery, pure `renderPage`, `emit`, stable ids, per-request `ctx`, `loadConfig`/overrides, parser helpers, pipeline assets, `ChocolaComponent` mount/update/remove, and brace utilities. See `CONTRIBUTING.md`.
 
 ## Benchmarks
 

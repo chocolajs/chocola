@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseScript, computeReachable } from "./script.js";
+import { parseScript, computeReachable } from "../parser/script.js";
 
 test("parseScript: simple let/const and props", () => {
   const { props, topVars } = parseScript(`export let title = "Card"; let a = 1, b = 2; const c = 3;`);
