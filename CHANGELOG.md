@@ -1,5 +1,11 @@
 # Chocola Changelog
 
+## 2.0.0-next.12 (Oct 07, 2026)
+
+- Splitted Chocola into the main library (Chocola) and the metaframework ([ChocolaKit](https://github.com/chocolajs/kit)):
+  - Removes SSR, CLI and dev server (@sadgabi20: [#186](https://github.com/chocolajs/chocola/pull/186), [#191](https://github.com/chocolajs/chocola/pull/191))
+  - Updates the tests suite to work with the core library instead (@sadgabi20: [#197](https://github.com/chocolajs/chocola/pull/197))
+
 ## 2.0.0-next.11 (Sep 20, 2026)
 
 - `<script>` now resolves server-side to minimize bundle size (@sadgabi20: [#147](https://github.com/chocolajs/chocola/issues/147)).
