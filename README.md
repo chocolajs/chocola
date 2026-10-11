@@ -45,9 +45,9 @@ If this project achieves a wider support, it will have its own official support 
 
 ## Documentation
 
+- [Overview](documentation/01-introduction/01-overview.md)
 - [Getting started](documentation/01-introduction/02-getting-started.md)
-- [Project structure](documentation/01-introduction/03-project-structure.md)
-- [Build API reference](documentation/07-reference/04-cli.md)
+- [Fundamentals](documentation/02-components/01-fundamentals.md)
 
 ## Roadmap
 
