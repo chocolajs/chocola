@@ -1,18 +1,33 @@
-function hasCombinator(sel) {
+export const SCOPE_ATTR_PREFIX = "data-sc-";
+
+export function scopeAttribute(cssId) {
+  return SCOPE_ATTR_PREFIX + cssId;
+}
+
+const LEGACY_PSEUDO_ELEMENT_RE = /^(before|after|first-line|first-letter)\b/i;
+
+function splitPseudoElement(sel) {
   let depth = 0;
-  for (const ch of sel) {
-    if (ch === '[') depth++;
-    else if (ch === ']') depth--;
-    else if (depth === 0 && (ch === ' ' || ch === '>' || ch === '+' || ch === '~')) return true;
+  for (let i = 0; i < sel.length; i++) {
+    const ch = sel[i];
+    if (ch === "[" || ch === "(") depth++;
+    else if (ch === "]" || ch === ")") { if (depth > 0) depth--; }
+    else if (ch === ":" && depth === 0) {
+      if (sel[i + 1] === ":" || LEGACY_PSEUDO_ELEMENT_RE.test(sel.slice(i + 1))) {
+        return [sel.slice(0, i), sel.slice(i)];
+      }
+    }
   }
-  return false;
+  return [sel, ""];
 }
 
 function scopeSelector(sel, cssId) {
   const s = sel.trim();
-  if (s.startsWith("." + cssId)) return s;
-  if (hasCombinator(s)) return `.${cssId} ${s}`;
-  return `.${cssId}${s}, .${cssId} ${s}`;
+  if (!s) return s;
+  const token = `[${scopeAttribute(cssId)}]`;
+  if (s.includes(token)) return s;
+  const [head, pseudo] = splitPseudoElement(s);
+  return head + token + pseudo;
 }
 
 export function scopeCss(cssString, cssId) {

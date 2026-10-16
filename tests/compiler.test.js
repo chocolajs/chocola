@@ -338,6 +338,50 @@ test("a runtime-less component does not clobber its root child's chid", async ()
   }
 });
 
+test("scoped styles do not leak into nested child components", async () => {
+  const tmpParent = await fs.mkdtemp(path.join(os.tmpdir(), "chocola-scope-leak-"));
+  const root = path.join(tmpParent, "app");
+  try {
+    await fs.mkdir(path.join(root, "src", "lib"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "src", "index.html"),
+      "<html><body><app><Parent></Parent></app></body></html>"
+    );
+    await fs.writeFile(
+      path.join(root, "src", "lib", "Parent.html"),
+      '<style>button { background-color: red; color: white; }</style>' +
+        '<template><div class="parent"><h1>Parent Component</h1><Child></Child></div></template>'
+    );
+    await fs.writeFile(
+      path.join(root, "src", "lib", "Child.html"),
+      '<style>button { border: 1px solid blue; }</style>' +
+        '<template><div class="child"><button>Child Button</button></div></template>'
+    );
+
+    const leakGraph = await buildModuleGraph(root);
+    const result = await renderPage(leakGraph);
+
+    const parentHash = deterministicHash("parent.html", 8);
+    const childHash = deterministicHash("child.html", 8);
+
+    const scopedCss = result.files.find((f) => f.path.startsWith("sc-")).content;
+    assert.ok(scopedCss.includes(`button[data-sc-${parentHash}]`), scopedCss);
+    assert.ok(scopedCss.includes(`button[data-sc-${childHash}]`), scopedCss);
+    assert.ok(!scopedCss.includes(`.${parentHash} button`), "parent must not use descendant scoping");
+    assert.ok(!scopedCss.includes(`.${parentHash}button`), "parent must not use descendant scoping");
+
+    const childButton = result.html.match(/<button[^>]*>Child Button<\/button>/);
+    assert.ok(childButton, "child button should be rendered");
+    assert.ok(childButton[0].includes(`data-sc-${childHash}`), childButton[0]);
+    assert.ok(
+      !childButton[0].includes(`data-sc-${parentHash}`),
+      "child button must not carry the parent scope token"
+    );
+  } finally {
+    await fs.rm(tmpParent, { recursive: true, force: true });
+  }
+});
+
 test("emptyOutDir: false preserves stray files", async () => {
   const keepGraph = await buildModuleGraph(tmpRoot, { overrides: { emptyOutDir: false } });
   const outDir = keepGraph.paths.outDir;

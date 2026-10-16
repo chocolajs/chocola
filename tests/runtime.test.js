@@ -125,6 +125,28 @@ describe("runtime — ChocolaComponent", () => {
     host.remove();
   });
 
+  test("nested components keep their own scope token (no leak)", () => {
+    const host = mountHost();
+    class Nested extends ChocolaComponent {
+      constructor() {
+        super({ template: `<div class="nested"><button>Nested</button></div>`, hash: "nhash" });
+      }
+    }
+    const comp = new ChocolaComponent({
+      template: `<div class="parent"><Nested></Nested></div>`,
+      hash: "phash",
+      children: [{ tag: "nested", compClass: Nested }],
+    });
+    comp.mount(host, {});
+    const parent = host.querySelector(".parent");
+    const button = host.querySelector(".nested button");
+    assert.ok(parent.hasAttribute("data-sc-phash"), "parent root should carry parent scope");
+    assert.ok(button.hasAttribute("data-sc-nhash"), "nested button should carry child scope");
+    assert.ok(!button.hasAttribute("data-sc-phash"), "nested button must not carry parent scope");
+    comp.remove();
+    host.remove();
+  });
+
   test("non-element mount target errors gracefully; template without root errors", () => {
     const errors = [];
     const orig = console.error;
