@@ -483,6 +483,7 @@ export function processComponentElement(
   }
 
   childEntries.forEach(({ el: child, parent }) => {
+    if (!fragment.contains(child)) return;
     if (!condChains.has(parent)) {
       condChains.set(parent, { active: false, rendered: false });
     }
@@ -587,16 +588,23 @@ export function processComponentElement(
       );
     });
 
-    const condAttrs = {};
-    if (hasIf) condAttrs["if"] = child.getAttribute("if");
-    if (hasDelIf) condAttrs["mount:if"] = getMountIf(child);
-    if (hasElif) condAttrs["elif"] = child.getAttribute("elif");
-    if (hasElse) condAttrs["else"] = "";
+    const childCompName = child.tagName.toLowerCase() + ".html";
+    const nextChain = renderChain.concat(compName);
+    const isComponentNode = cx.loadedComponents.has(childCompName) && !nextChain.includes(childCompName);
+
+    // Apply the conditional to a child component before rendering it. A false
+    // mount:if/elif removes the element, and if we rendered first we would have
+    // already emitted a runtime binding (and a chid) for a component that never
+    // reaches the output — an orphaned selector that breaks hydration.
+    if (isComponentNode) {
+      applyConditionalToElement(child, ctxProxy, condChain, hasIf, hasDelIf, hasElif, hasElse);
+      if (!child.parentNode) return;
+    }
 
     const processed = processComponentElement(
       child,
       cx,
-      renderChain.concat(compName),
+      nextChain,
       displayName,
       template,
       globalCtx
@@ -605,12 +613,11 @@ export function processComponentElement(
     let condTarget = child;
     if (processed && processed.nodeType === 1) {
       condTarget = processed;
-      for (const [name, value] of Object.entries(condAttrs)) {
-        condTarget.setAttribute(name, value);
-      }
     }
 
-    applyConditionalToElement(condTarget, ctxProxy, condChain, hasIf, hasDelIf, hasElif, hasElse);
+    if (!isComponentNode) {
+      applyConditionalToElement(condTarget, ctxProxy, condChain, hasIf, hasDelIf, hasElif, hasElse);
+    }
 
     interpolateNode(condTarget, ctxProxy)
   });
@@ -620,10 +627,6 @@ export function processComponentElement(
 
   if (firstChild && firstChild.nodeType === 1) {
     if (script) {
-      const compId = "chid-" + deterministicHash(compName + ":" + cx.compIdColl.length, 8);
-      cx.compIdColl.push(compId);
-      firstChild.setAttribute("chid", compId);
-
       const ctxRegex = /ctx\s*=\s*({.*?})/;
       const ctxMatch = script.match(ctxRegex);
       let runtimeCtx = {};
@@ -657,6 +660,17 @@ export function processComponentElement(
       let runtime = extractRuntime(script, displayName);
 
       if (runtime) {
+        // Only a component that actually hydrates needs a chid. Assigning one
+        // for a runtime-less component (e.g. a layout page whose template root
+        // is another component) would clobber the child's chid while the child's
+        // runtime call still targets the original value.
+        const existingChid = firstChild.getAttribute("chid");
+        const compId = existingChid || "chid-" + deterministicHash(compName + ":" + cx.compIdColl.length, 8);
+        if (!existingChid) {
+          cx.compIdColl.push(compId);
+          firstChild.setAttribute("chid", compId);
+        }
+
         let fnEntry = cx.runtimeMap && cx.runtimeMap.get(compName);
         let fnId;
         if (!fnEntry) {

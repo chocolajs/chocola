@@ -52,6 +52,16 @@ function runtimeFunctionNames(result) {
   return names;
 }
 
+function collectChids(result) {
+  const htmlChids = new Set([...result.html.matchAll(/chid="([^"]+)"/g)].map((m) => m[1]));
+  const jsChids = new Set();
+  for (const f of result.files) {
+    if (!f.content.includes("DOMContentLoaded")) continue;
+    for (const m of f.content.matchAll(/\[chid="([^"]+)"\]/g)) jsChids.add(m[1]);
+  }
+  return { htmlChids, jsChids };
+}
+
 test("compiler entry point exports the module pipeline", () => {
   assert.equal(typeof buildModuleGraph, "function");
   assert.equal(typeof renderPage, "function");
@@ -253,6 +263,76 @@ test("missing <app> container throws", async () => {
     await fs.writeFile(path.join(root, "src", "index.html"), "<html><body><p>no app here</p></body></html>");
     const badGraph = await buildModuleGraph(root);
     await assert.rejects(() => renderPage(badGraph), /<app>/);
+  } finally {
+    await fs.rm(tmpParent, { recursive: true, force: true });
+  }
+});
+
+test("mount:if on a child component does not emit orphaned runtime bindings", async () => {
+  const tmpParent = await fs.mkdtemp(path.join(os.tmpdir(), "chocola-chid-"));
+  const root = path.join(tmpParent, "app");
+  try {
+    await fs.mkdir(path.join(root, "src", "lib"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "src", "index.html"),
+      '<html><body><app><Panel></Panel><Counter start="5"></Counter></app></body></html>'
+    );
+    await fs.writeFile(
+      path.join(root, "src", "lib", "Counter.html"),
+      '<script>export let start=0;let span;function $runtime(){span.textContent=start;}</script>' +
+        '<template><div class="counter"><span bind:self="span">{start}</span></div></template>'
+    );
+    await fs.writeFile(
+      path.join(root, "src", "lib", "Panel.html"),
+      '<script>let visible=false;import Counter from "./Counter.html";</script>' +
+        '<template><div class="panel">' +
+        '<Counter mount:if="{visible}"></Counter>' +
+        '<div mount:if="{visible}"><Counter></Counter></div>' +
+        "</div></template>"
+    );
+
+    const chidGraph = await buildModuleGraph(root);
+    const result = await renderPage(chidGraph);
+
+    const { htmlChids, jsChids } = collectChids(result);
+
+    assert.ok(htmlChids.size > 0, "expected SSR chids in the rendered page");
+    assert.equal(jsChids.size, 1, "only the visible Counter should be hydrated");
+    for (const id of jsChids) {
+      assert.ok(htmlChids.has(id), `runtime binding targets missing chid ${id}`);
+    }
+  } finally {
+    await fs.rm(tmpParent, { recursive: true, force: true });
+  }
+});
+
+test("a runtime-less component does not clobber its root child's chid", async () => {
+  const tmpParent = await fs.mkdtemp(path.join(os.tmpdir(), "chocola-chid-root-"));
+  const root = path.join(tmpParent, "app");
+  try {
+    await fs.mkdir(path.join(root, "src", "lib"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "src", "index.html"),
+      '<html><body><app><Wrapper></Wrapper></app></body></html>'
+    );
+    await fs.writeFile(
+      path.join(root, "src", "lib", "Inner.html"),
+      '<script>let el;function $runtime(){el.textContent="hydrated";}</script>' +
+        '<template><div bind:self="el">inner</div></template>'
+    );
+    await fs.writeFile(
+      path.join(root, "src", "lib", "Wrapper.html"),
+      '<script>\n  import Inner from "./Inner.html";\n  let label = "wrapper";\n</script>' +
+        '<template><Inner></Inner></template>'
+    );
+
+    const chidGraph = await buildModuleGraph(root);
+    const result = await renderPage(chidGraph);
+
+    const { htmlChids, jsChids } = collectChids(result);
+
+    assert.equal(jsChids.size, 1, "Inner is the only hydrating component");
+    assert.deepEqual([...htmlChids], [...jsChids], "the chid on the shared root must be stable");
   } finally {
     await fs.rm(tmpParent, { recursive: true, force: true });
   }
