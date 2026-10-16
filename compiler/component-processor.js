@@ -6,7 +6,7 @@ import {
   extractPropsDefaults, extractRuntime, extractTopLevelFunctions, extractTopLevelVariables, parseScript, computeReachable,
   extractCtxFromEl, hasMountIf, getMountIf,
   reservedAttrs, validateChainStructure, applyConditionalToElement, interpolateNode,
-  scopeCss, compileExpr, evaluateConstant,
+  scopeCss, scopeAttribute, compileExpr, evaluateConstant,
 } from "../parser/index.js";
 
 class ProcessContext {
@@ -49,6 +49,21 @@ function parseFragment(html, doc) {
   return fragment;
 }
 
+function tagDescendants(node, cssId) {
+  if (!cssId) return;
+  const attr = scopeAttribute(cssId);
+  for (const el of node.querySelectorAll("*")) {
+    el.setAttribute(attr, "");
+  }
+}
+
+function scopeTemplateHtml(html, cssId, doc) {
+  const holder = doc.createElement("div");
+  holder.innerHTML = html;
+  tagDescendants(holder, cssId);
+  return holder.innerHTML;
+}
+
 function generateCSRClass(compName, cx, explicitClassName) {
   if (cx.csrClasses.has(compName)) return;
 
@@ -60,7 +75,7 @@ function generateCSRClass(compName, cx, explicitClassName) {
   const dom = parseHTML(instance);
   const doc = dom.document;
   const script = doc.querySelector("script")?.innerHTML;
-  const template = doc.querySelector("template")?.innerHTML;
+  let template = doc.querySelector("template")?.innerHTML;
   const styles = doc.querySelector("style")?.innerHTML;
 
   if (!template) return;
@@ -74,6 +89,8 @@ function generateCSRClass(compName, cx, explicitClassName) {
     cx.cssScopesMap.set(compName, deterministicHash(compName, 8));
   }
   const cssId = cx.cssScopesMap.get(compName);
+
+  template = scopeTemplateHtml(template, cssId, doc);
 
   if (styles) {
     cx.scopedStyles.push(scopeCss(styles, cssId));
@@ -297,6 +314,12 @@ export function processComponentElement(
     return false;
   }
 
+  let cssId = cx.cssScopesMap && cx.cssScopesMap.get(compName);
+  if (!cssId) {
+    cssId = deterministicHash(compName, 8);
+    cx.cssScopesMap.set(compName, cssId);
+  }
+
   // Store original script for reachability (before stripping)
   const originalScriptForReach = script;
   if (script) {
@@ -446,6 +469,7 @@ export function processComponentElement(
   });
 
   const fragment = parseFragment(template, doc);
+  tagDescendants(fragment, cssId);
 
   warnUnusedDeclarations(cx, compName, instance, script, fragment);
 
@@ -790,11 +814,6 @@ export function processComponentElement(
     }
   }
 
-  let cssId = cx.cssScopesMap && cx.cssScopesMap.get(compName);
-  if (!cssId) {
-    cssId = deterministicHash(compName, 8);
-    cx.cssScopesMap.set(compName, cssId);
-  }
   if (fragment.children.length === 1 && firstChild.nodeType === 1) {
     firstChild.classList.add(cssId);
   }

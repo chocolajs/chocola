@@ -119,7 +119,7 @@ The steps for a single element are as follows.
 
 10. **Runtime id.** If the component has a `script` block and at least one element root, the processor assigns a deterministic attribute named `chid`. The value is derived from the component name and its index, hashed as `chid-<hash>`, and placed on the first element root.
 
-11. **CSS scoping.** Every component receives a deterministic hash class on its root element, derived from the component filename. If the component has a `style` block, its selectors are rewritten to be scoped under that class. Simple selectors such as `.foo` generate both an AND-scoped variant and a descendant-scoped variant. Selectors that contain combinators use descendant scoping only. Selectors for `root` and `root` with a class are scoped to the root element only.
+11. **CSS scoping.** Every component receives a deterministic hash class on its root element, derived from the component filename, plus a per-element scope attribute `data-sc-<hash>` on every element it renders. If the component has a `style` block, its selectors are rewritten by appending the scope attribute to the rightmost compound selector (before any pseudo-element). Selectors for `root` map to the root hash class. Because each element only carries the scope attribute of the component that owns it, a component's styles never match elements that belong to a nested child component.
 
 12. **Runtime chunk.** For components that need client execution, a runtime call is generated. The call looks like `r_<hash>(el, ctx)` where the function id is a stable per-module hash of the component filename. This call is injected so the browser can re-run logic after load.
 
@@ -210,7 +210,7 @@ hosts (e.g. ChocolaKit)   → per-request renderPage(graph, ctx); serve files/co
 
 - **Components**: Single-file `.html` components with `<template>`, `<script>`, and `<style>` sections
 - **File-based loading**: `.html` component files are loaded as raw strings and parsed by the compiler
-- **CSS Scoping**: Component styles are scoped by rewriting selectors under a deterministic hash class derived from the component filename. The hash class is always present on every component's root element, even without styles, serving as a stable component identifier. Both root and descendant matching via dual selectors (AND + descendant).
+- **CSS Scoping**: Component styles are scoped with a per-element `data-sc-<hash>` attribute. Every element a component renders carries that component's scope attribute, and selectors are rewritten to require it. The hash class is always present on every component's root element, even without styles, serving as a stable component identifier. Because scope attributes are owned per element, styles cannot leak into nested components.
 - **Hash reference map**: `.chocola/hashes.json` is written after each build, mapping component filenames to their hash classes for debugging. It is auto-generated and should be gitignored.
 - **Runtime scripts**: Components with a `$runtime` function get a unique `chid` and a runtime call of the form `r_<hash>(el, ctx)` that re-runs the `$runtime` function on `DOMContentLoaded`
 - **Client-Side Rendering (CSR)**: The `ChocolaComponent` base class (`runtime/index.js`) allows dynamic component instantiation in the browser via `mount`, `remove`, and `update` methods. It supports `bind:*` attributes, conditionals, slots, expression interpolation, and automatic event-listener cleanup.

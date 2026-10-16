@@ -3,7 +3,7 @@ title: Scoped styles
 description: Encapsulated styles for your components
 ---
 
-Chocola components support scoped styles — CSS included in a component only affects elements inside that component. Chocola adds a unique hash class to the component's root element so the styles don't leak outside.
+Chocola components support scoped styles — CSS included in a component only affects elements inside that component. Chocola marks every element of a component with a unique scope attribute (`data-sc-<hash>`) so the styles don't leak outside, including into nested child components.
 
 ### Usage
 

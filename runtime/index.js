@@ -120,6 +120,15 @@ function processDirectives(element, ctx, chain) {
   }
 }
 
+function applyScopeAttributes(root, hash) {
+  if (!hash) return;
+  const attr = "data-sc-" + hash;
+  root.setAttribute(attr, "");
+  for (const el of root.querySelectorAll("*")) {
+    el.setAttribute(attr, "");
+  }
+}
+
 function processSlots(el, projected) {
   const slots = el.querySelectorAll("slot");
   for (const slot of slots) {
@@ -224,6 +233,7 @@ class ChocolaComponent {
       return null;
     }
 
+    applyScopeAttributes(root, this.#hash);
     processSlots(root, this.#children || []);
     processDirectives(root, mergedCtx, { active: false, rendered: false });
     interpolateAttributes(root, mergedCtx);

@@ -28,10 +28,10 @@ function el(html) {
 }
 
 describe("parser — scopeCss", () => {
-  test("simple selectors get dual scoping", () => {
+  test("simple selectors get a per-element scope attribute", () => {
     const out = scopeCss(".foo { color: red; }", "abc");
-    assert.ok(out.includes(".abc.foo"), `AND variant missing: ${out}`);
-    assert.ok(out.includes(".abc .foo"), `descendant variant missing: ${out}`);
+    assert.ok(out.includes(".foo[data-sc-abc]"), `scope attribute missing: ${out}`);
+    assert.ok(!out.includes(".abc .foo"), `descendant leak scoping must be gone: ${out}`);
   });
 
   test(":root maps to the scope class", () => {
@@ -40,9 +40,16 @@ describe("parser — scopeCss", () => {
     assert.ok(!out.includes(":root"), `unscoped :root remains: ${out}`);
   });
 
-  test("combinators use descendant scoping only", () => {
+  test("combinators scope the rightmost compound only", () => {
     const out = scopeCss(".a > .b { color: red; }", "abc");
-    assert.ok(out.includes(".abc .a > .b"), out);
+    assert.ok(out.includes(".a > .b[data-sc-abc]"), out);
+    assert.ok(!out.includes(".abc .a > .b"), `descendant leak scoping must be gone: ${out}`);
+  });
+
+  test("scope attribute is inserted before pseudo-elements", () => {
+    const out = scopeCss("a:hover { color: red; } .x::before { content: ''; }", "abc");
+    assert.ok(out.includes("a:hover[data-sc-abc]"), out);
+    assert.ok(out.includes(".x[data-sc-abc]::before"), out);
   });
 
   test("@media inner rules are scoped, @keyframes renamed", () => {
@@ -50,7 +57,7 @@ describe("parser — scopeCss", () => {
       "@media (min-width: 10px) { .foo { color: red; } } @keyframes spin { to { opacity: 1; } } .x { animation: spin 1s; }",
       "abc"
     );
-    assert.ok(out.includes(".abc.foo") || out.includes(".abc .foo"), `media inner not scoped: ${out}`);
+    assert.ok(out.includes(".foo[data-sc-abc]"), `media inner not scoped: ${out}`);
     assert.ok(out.includes("spin-abc"), `keyframe not renamed: ${out}`);
   });
 });
