@@ -147,6 +147,24 @@ describe("runtime — ChocolaComponent", () => {
     host.remove();
   });
 
+  test("namespace-style child tags mount through colon-safe lookup", () => {
+    const host = mountHost();
+    class Card extends ChocolaComponent {
+      constructor() {
+        super({ template: `<div class="ns-child">nested</div>`, hash: "nshash" });
+      }
+    }
+    const comp = new ChocolaComponent({
+      template: `<div class="parent"><lib:card></lib:card></div>`,
+      hash: "phash-ns",
+      children: [{ tag: "lib:card", compClass: Card }],
+    });
+    comp.mount(host, {});
+    assert.ok(host.querySelector(".ns-child"), "namespace child should mount");
+    comp.remove();
+    host.remove();
+  });
+
   test("non-element mount target errors gracefully; template without root errors", () => {
     const errors = [];
     const orig = console.error;

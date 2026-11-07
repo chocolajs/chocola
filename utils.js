@@ -2,9 +2,8 @@ const LBRACE_PH = "_%%CHOCOLA-LBRACE%%_";
 const RBRACE_PH = "_%%CHOCOLA-RBRACE%%_";
 const PROTECTED_REGEX = /_%%CHOCOLA-(?:AMP|LT|GT)\d+%%_/g;
 
-let protectSeq = 0;
-
 export function protectCurlyBraces(html) {
+  let seq = 0;
   return html
     .replace(/&(?:lbrace|#123|#x7B);/gi, LBRACE_PH)
     .replace(/&(?:rcub|#125|#x7D);/gi, RBRACE_PH)
@@ -12,9 +11,9 @@ export function protectCurlyBraces(html) {
     .map((part, i) => i % 2 === 0
       ? part.replace(/\{([^{}]*)\}/g, (m, inner) =>
           `{${inner
-            .replace(/&/g, () => `_%%CHOCOLA-AMP${protectSeq++}%%_`)
-            .replace(/</g, () => `_%%CHOCOLA-LT${protectSeq++}%%_`)
-            .replace(/>/g, () => `_%%CHOCOLA-GT${protectSeq++}%%_`)}}`)
+            .replace(/&/g, () => `_%%CHOCOLA-AMP${seq++}%%_`)
+            .replace(/</g, () => `_%%CHOCOLA-LT${seq++}%%_`)
+            .replace(/>/g, () => `_%%CHOCOLA-GT${seq++}%%_`)}}`)
       : part)
     .join("");
 }

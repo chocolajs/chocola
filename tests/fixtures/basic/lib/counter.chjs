@@ -1,11 +1,12 @@
 <script>
+  import { fmt } from "./format.js";
   export let count = 0;
   let span;
   let btn;
   function $runtime() {
     btn.addEventListener("click", () => {
       count++;
-      span.textContent = count;
+      span.textContent = fmt(count);
     });
   }
 </script>

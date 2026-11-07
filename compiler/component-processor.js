@@ -1,52 +1,120 @@
 import path from "path";
-import { parseHTML } from "linkedom";
-import { protectCurlyBraces } from "../utils.js";
-import { genRandomId, runtimeFunctionId, throwError, deterministicHash, warnConstantCondition, warnUnusedDeclaration, findElementLine } from "./utils.js";
+import { protectCurlyBraces, restoreCurlyBraces } from "../utils.js";
 import {
-  extractPropsDefaults, extractRuntime, extractTopLevelFunctions, extractTopLevelVariables, parseScript, computeReachable,
-  extractCtxFromEl, hasMountIf, getMountIf,
-  reservedAttrs, validateChainStructure, applyConditionalToElement, interpolateNode,
-  scopeCss, scopeAttribute, compileExpr, evaluateConstant,
+  extractPropsDefaults,
+  extractRuntime,
+  extractTopLevelFunctions,
+  extractTopLevelVariables,
+  parseScript,
+  computeReachable,
+  extractCtxFromEl,
+  hasMountIf,
+  getMountIf,
+  reservedAttrs,
+  validateChainStructure,
+  applyConditionalToElement,
+  interpolateNode,
+  scopeCss,
+  scopeAttribute,
+  compileExpr,
+  evaluateConstant,
 } from "../parser/index.js";
+import {
+  deterministicHash,
+  runtimeFunctionId,
+  throwError,
+  warnConstantCondition,
+  warnUnusedDeclaration,
+  findElementLine,
+} from "./utils.js";
+import { parseFragment } from "./dom-processor.js";
+import { scanTemplateTags } from "./module-source.js";
 
-class ProcessContext {
-  constructor(loadedComponents, runtimeChunks, compIdColl, runtimeMap, cssScopes, cssScopesMap, scopedStyles, staticCtxRegistry, csrClasses, treeShakeRuntime = true, originalNames = null) {
-    this.loadedComponents = loadedComponents;
-    this.runtimeChunks = runtimeChunks;
-    this.compIdColl = compIdColl;
-    this.runtimeMap = runtimeMap;
-    this.cssScopes = cssScopes;
-    this.cssScopesMap = cssScopesMap;
-    this.scopedStyles = scopedStyles;
-    this.staticCtxRegistry = staticCtxRegistry;
-    this.csrClasses = csrClasses;
+const RUNTIME_KW = "$runtime";
+const CHJS_EXTENSION = ".chjs";
+
+function isChjsSource(source) {
+  return typeof source === "string" && source.toLowerCase().endsWith(CHJS_EXTENSION);
+}
+
+/**
+ * Fresh, per-render state. `render()` creates one of these per call so
+ * concurrent renders never share mutable state.
+ */
+export class ProcessContext {
+  constructor(graph, doc) {
+    this.graph = graph;
+    this.doc = doc;
+    this.runtimeChunks = [];
+    this.compIdColl = [];
+    this.runtimeMap = new Map();
+    this.cssScopesMap = new Map();
+    this.scopedStyles = [];
+    this.styleModules = new Set();
+    this.staticCtxRegistry = new Map();
+    this.csrClasses = new Map();
+    this.classNames = new Map();
+    this.usedImports = new Map();
+    this.treeShakeRuntime = graph?.config?.treeShakeRuntime !== false;
+
+    // Internal render bookkeeping.
     this.unusedWarned = new Set();
-    this.treeShakeRuntime = treeShakeRuntime !== false;
-    this.originalNames = originalNames || new Map();
+    this.csrGenerating = new Set();
+    this.runtimeFunctions = new Map();
+    this.runtimeCalls = [];
+    this.moduleBindings = new Map();
+  }
+
+  resolveModuleForTag(ownerModule, tagLower) {
+    return resolveModuleForTag(ownerModule, tagLower, this.graph);
   }
 }
 
-function resolveDisplayName(compName, cx) {
-  if (!compName) return compName;
-  if (cx?.originalNames?.has(compName)) return cx.originalNames.get(compName);
-  const lower = compName.toLowerCase();
-  if (cx?.originalNames?.has(lower)) return cx.originalNames.get(lower);
-  return compName;
+/**
+ * Resolve a template tag in the scope of the module that owns the template.
+ *
+ * @param {import("./module-graph.js").ChocolaModule} ownerModule
+ * @param {string} tagLower
+ * @param {import("./module-graph.js").ModuleGraph} graph
+ * @returns {import("./module-graph.js").ChocolaModule|null}
+ */
+export function resolveModuleForTag(ownerModule, tagLower, graph) {
+  if (!ownerModule || !graph) return null;
+
+  if (ownerModule.importMap.has(tagLower)) {
+    return graph.moduleById(ownerModule.importMap.get(tagLower)) || null;
+  }
+
+  if (tagLower.includes(":")) {
+    const [prefix, ...rest] = tagLower.split(":");
+    const namespace = ownerModule.namespaceMap.get(prefix);
+    if (namespace) {
+      return graph.moduleById(namespace.components.get(rest.join("/"))) || null;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Canonical client class name: PascalCase basename + id hash.
+ *
+ * @param {import("./module-graph.js").ChocolaModule} module
+ * @returns {string}
+ */
+export function canonicalClassName(module) {
+  const basename = module.id.split("/").pop().replace(/\.chjs$/i, "");
+  const words = basename.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  let name = words
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join("");
+  if (!name) name = "Component";
+  if (/^[0-9]/.test(name)) name = "_" + name;
+  return `${name}_${deterministicHash(module.id, 4)}`;
 }
 
 function escapeForTemplateLiteral(str) {
   return str.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\${/g, "\\${");
-}
-
-function parseFragment(html, doc) {
-  const fragment = doc.createDocumentFragment();
-  const temp = doc.createElement("div");
-  temp.innerHTML = html;
-  const children = [...temp.childNodes];
-  for (const child of children) {
-    fragment.appendChild(child);
-  }
-  return fragment;
 }
 
 function tagDescendants(node, cssId) {
@@ -64,155 +132,27 @@ function scopeTemplateHtml(html, cssId, doc) {
   return holder.innerHTML;
 }
 
-function generateCSRClass(compName, cx, explicitClassName) {
-  if (cx.csrClasses.has(compName)) return;
-
-  const displayName = resolveDisplayName(compName, cx);
-  let instance = cx.loadedComponents.get(compName);
-  if (!instance) return;
-
-  instance = protectCurlyBraces(instance);
-  const dom = parseHTML(instance);
-  const doc = dom.document;
-  const script = doc.querySelector("script")?.innerHTML;
-  let template = doc.querySelector("template")?.innerHTML;
-  const styles = doc.querySelector("style")?.innerHTML;
-
-  if (!template) return;
-
-  const compProps = extractPropsDefaults(script);
-  const topFuncSrc = extractTopLevelFunctions(script || "", RUNTIME_KW);
-  const topVars = extractTopLevelVariables(script || "");
-  let runtime = extractRuntime(script || "", displayName);
-
-  if (!cx.cssScopesMap.has(compName)) {
-    cx.cssScopesMap.set(compName, deterministicHash(compName, 8));
-  }
-  const cssId = cx.cssScopesMap.get(compName);
-
-  template = scopeTemplateHtml(template, cssId, doc);
-
-  if (styles) {
-    cx.scopedStyles.push(scopeCss(styles, cssId));
-  }
-
-  const childMappings = [];
-  const bindVarNames = new Set();
-  const templateDoc = parseFragment(template, doc);
-  const seenTags = new Set();
-  for (const el of templateDoc.querySelectorAll("*")) {
-    const tag = el.tagName.toLowerCase();
-    if (!seenTags.has(tag)) {
-      seenTags.add(tag);
-      const childCompName = tag + ".html";
-      if (cx.loadedComponents.has(childCompName)) {
-        generateCSRClass(childCompName, cx);
-        const childClassName = childCompName.replace(".html", "").replace(/^\w/, c => c.toUpperCase());
-        childMappings.push({ tag, compClass: childClassName });
-      }
+function findImportLocal(module, childId, tagLower) {
+  for (const imp of module.imports || []) {
+    if (!isChjsSource(imp.source)) continue;
+    for (const specifier of imp.specifiers || []) {
+      if (!specifier.local) continue;
+      if (specifier.local.toLowerCase() !== tagLower) continue;
+      if (module.importMap.get(tagLower) !== childId) continue;
+      return specifier.local;
     }
+  }
+  return null;
+}
+
+function collectBindingNames(fragment) {
+  const names = new Set();
+  for (const el of fragment.querySelectorAll("*")) {
     for (const attr of el.attributes) {
-      if (attr.name.startsWith("bind:")) {
-        bindVarNames.add(attr.value);
-      }
+      if (attr.name.startsWith("bind:")) names.add(attr.value);
     }
   }
-
-  let csrRuntimeSource = null;
-  // Compute reachable for client bundling (Step B) - Feature flag: treeShakeRuntime
-  const parsedForReach = parseScript(script || "");
-  let reach = null;
-  if (cx.treeShakeRuntime !== false && parsedForReach.ast && runtime) {
-    reach = computeReachable(parsedForReach, { bindings: [...bindVarNames] });
-    if (reach.fallback) {
-      // conservative: include all and warn
-    }
-  }
-  const injectedNames = new Set(compProps.map(p => p.name));
-  for (const varName of bindVarNames) injectedNames.add(varName);
-  let topVarsToInject = topVars.filter(v => !injectedNames.has(v.name));
-  let propsToInject = compProps;
-  let funcsToInject = topFuncSrc;
-  let bindingsToInject = [...bindVarNames];
-  if (cx.treeShakeRuntime !== false && reach && !reach.fallback) {
-    const neededVarNames = new Set(reach.neededVars.flatMap(v => v.names));
-    const neededPropNames = new Set(reach.neededProps.map(p => p.name));
-    const neededFuncNames = new Set(reach.neededFuncs.map(src => {
-      const m = src.match(/^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/);
-      return m ? m[1] : null;
-    }).filter(Boolean));
-    const neededBindingSet = new Set(reach.neededBindings);
-    // Filter to reachable only
-    propsToInject = compProps.filter(p => neededPropNames.has(p.name));
-    topVarsToInject = topVars.filter(v => neededVarNames.has(v.name) && !injectedNames.has(v.name));
-    funcsToInject = topFuncSrc.filter(src => {
-      const m = src.match(/^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/);
-      return m && neededFuncNames.has(m[1]);
-    });
-    bindingsToInject = [...bindVarNames].filter(b => neededBindingSet.has(b));
-  }
-  if (runtime) {
-    let injectCode = "";
-    for (const { name, defaultValue } of propsToInject) {
-      if (defaultValue !== undefined) {
-        injectCode += `let ${name} = ctx.${name}??(${defaultValue});\n`;
-      } else {
-        injectCode += `let ${name} = ctx.${name};\n`;
-      }
-    }
-    for (const { keyword, name, value } of topVarsToInject) {
-      if (value !== undefined) {
-        injectCode += `${keyword} ${name} = ${value};\n`;
-      } else {
-        injectCode += `${keyword} ${name};\n`;
-      }
-    }
-    for (const varName of bindingsToInject) {
-      if (varName !== "self") {
-        injectCode += `let ${varName} = ctx.${varName};\n`;
-      }
-    }
-    if (funcsToInject.length > 0) {
-      injectCode += "\n" + funcsToInject.join("\n\n") + "\n";
-    }
-    runtime = runtime.replace(/\$runtime\([^)]*\)\s*\{/, match => match + "\n" + injectCode);
-    runtime = runtime.replace(`${RUNTIME_KW}()`, `function(self, ctx)`);
-    csrRuntimeSource = runtime.replace(/^(async\s+)?function\s+\w+/, "$1function");
-  }
-
-  const className = explicitClassName || compName.replace(".html", "").replace(/^\w/, c => c.toUpperCase());
-  const propsParts = [];
-  // For CSR class props: when runtime exists, include only reachable; otherwise keep all (fallback for CSR-only)
-  let propsForClass = compProps;
-  if (cx.treeShakeRuntime !== false && runtime && reach && !reach.fallback) {
-    propsForClass = propsToInject;
-  }
-  for (const { name, defaultValue } of propsForClass) {
-    propsParts.push(`${JSON.stringify(name)}: ${defaultValue !== undefined ? defaultValue : "null"}`);
-  }
-
-  const childrenPart = childMappings.length > 0
-    ? ",\n      children: [" + childMappings.map(m => `{tag:"${m.tag}",compClass:${m.compClass}}`).join(",") + "]"
-    : "";
-  const runtimePart = csrRuntimeSource ? `,\n      runtime: ${csrRuntimeSource}` : "";
-  const propsPart = propsParts.length > 0 ? `{ ${propsParts.join(", ")} }` : "{}";
-  const classDef = `class ${className} extends ChocolaComponent {\n  constructor() {\n    super({\n      template: \`${escapeForTemplateLiteral(template)}\`,\n      hash: "${cssId}",\n      props: ${propsPart}${runtimePart}${childrenPart}\n    });\n  }\n}`;
-  cx.csrClasses.set(compName, classDef);
-}
-
-const BARE_IDENTIFIER_RE = /(?<![.\w$])[a-zA-Z_$][0-9a-zA-Z_$]*/g;
-const PROPERTY_IDENTIFIER_RE = /\.([a-zA-Z_$][0-9a-zA-Z_$]*)/g;
-
-function countIdentifiers(text, counts) {
-  for (const re of [BARE_IDENTIFIER_RE, PROPERTY_IDENTIFIER_RE]) {
-    re.lastIndex = 0;
-    for (const m of text.matchAll(re)) counts.set(m[1] ?? m[0], (counts.get(m[1] ?? m[0]) || 0) + 1);
-  }
-  return counts;
-}
-
-function escapeNameForRegex(name) {
-  return name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [...names];
 }
 
 function findLineInSource(source, regex) {
@@ -221,39 +161,67 @@ function findLineInSource(source, regex) {
   return source.substring(0, match.index).split("\n").length;
 }
 
-function warnUnusedDeclarations(cx, compName, instance, script, fragment) {
-  const displayName = resolveDisplayName(compName, cx);
-  if (!script && !fragment.querySelector("[bind\\:]")) return;
-  if (cx.unusedWarned.has(compName)) return;
-  cx.unusedWarned.add(compName);
+function findElementLocation(module, element) {
+  const outerHTML = restoreCurlyBraces(element.outerHTML);
+  const lineNum = findElementLine(module.source, outerHTML);
+  return lineNum !== null ? `${module.id}:${lineNum}` : module.id;
+}
 
-  const props = extractPropsDefaults(script).map(p => p.name);
-  const topVars = extractTopLevelVariables(script).map(v => v.name);
+function warnUnusedDeclarations(cx, module, fragment) {
+  if (cx.unusedWarned.has(module.id)) return;
+  if (!module.script && !fragment.querySelector("[bind\\:]")) return;
+  cx.unusedWarned.add(module.id);
+
+  const script = module.script || "";
+  const props = extractPropsDefaults(script).map((prop) => prop.name);
+  const topVars = extractTopLevelVariables(script).map((variable) => variable.name);
   const topFuncs = extractTopLevelFunctions(script, RUNTIME_KW)
-    .map(src => src.match(/^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/)?.[1])
+    .map(
+      (src) =>
+        src.match(/^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/)?.[1]
+    )
     .filter(Boolean);
 
   const bindings = [];
   for (const el of fragment.querySelectorAll("*")) {
     for (const attr of el.attributes) {
-      if (attr.name.startsWith("bind:")) bindings.push({ name: attr.value, element: el });
+      if (attr.name.startsWith("bind:")) {
+        bindings.push({ name: attr.value, element: el });
+      }
     }
   }
 
   const counts = new Map();
-  if (script) countIdentifiers(script, counts);
+  const countIdentifiers = (text) => {
+    for (const re of [
+      /(?<![.\w$])[a-zA-Z_$][0-9a-zA-Z_$]*/g,
+      /\.([a-zA-Z_$][0-9a-zA-Z_$]*)/g,
+    ]) {
+      re.lastIndex = 0;
+      for (const match of text.matchAll(re)) {
+        const name = match[1] ?? match[0];
+        counts.set(name, (counts.get(name) || 0) + 1);
+      }
+    }
+  };
+
+  if (script) countIdentifiers(script);
 
   const walk = (node) => {
     if (node.nodeType === 3) {
-      for (const m of node.textContent.matchAll(/\{([^}]+)\}/g)) countIdentifiers(m[1], counts);
+      for (const match of node.textContent.matchAll(/\{([^}]+)\}/g)) {
+        countIdentifiers(match[1]);
+      }
       return;
     }
     if (node.attributes) {
       for (const attr of node.attributes) {
         if (attr.name.startsWith("bind:")) {
-          countIdentifiers(attr.value, counts);
+          countIdentifiers(attr.value);
         } else {
-          for (const m of attr.value.matchAll(/\{([^}]+)\}/g)) countIdentifiers(m[1], counts);
+          for (const match of attr.value.matchAll(/\{([^}]+)\}/g)) {
+            countIdentifiers(match[1]);
+          }
         }
       }
     }
@@ -263,228 +231,529 @@ function warnUnusedDeclarations(cx, compName, instance, script, fragment) {
 
   const isUnused = (name) => (counts.get(name) || 0) <= 1;
   const warn = (kind, name, declRegex) => {
-    const lineNum = findLineInSource(instance, declRegex);
-    warnUnusedDeclaration(lineNum !== null ? `${displayName}:${lineNum}` : displayName, kind, name);
+    const lineNum = findLineInSource(module.source, declRegex);
+    warnUnusedDeclaration(
+      lineNum !== null ? `${module.id}:${lineNum}` : module.id,
+      kind,
+      name
+    );
   };
 
+  const escape = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
   for (const name of props) {
-    if (isUnused(name)) warn("prop", name, new RegExp("export\\s+let\\s+" + escapeNameForRegex(name) + "\\b"));
+    if (isUnused(name)) {
+      warn("prop", name, new RegExp("export\\s+let\\s+" + escape(name) + "\\b"));
+    }
   }
   for (const name of topVars) {
-    if (isUnused(name)) warn("variable", name, new RegExp("(?:^|[^\\w])(?:let|const|var)\\s+" + escapeNameForRegex(name) + "\\b"));
+    if (isUnused(name)) {
+      warn(
+        "variable",
+        name,
+        new RegExp("(?:^|[^\\w])(?:let|const|var)\\s+" + escape(name) + "\\b")
+      );
+    }
   }
   for (const name of topFuncs) {
-    if (isUnused(name)) warn("function", name, new RegExp("(?:async\\s+)?function\\s+" + escapeNameForRegex(name) + "\\b"));
+    if (isUnused(name)) {
+      warn(
+        "function",
+        name,
+        new RegExp("(?:async\\s+)?function\\s+" + escape(name) + "\\b")
+      );
+    }
   }
   const seenBindings = new Set();
   for (const { name, element } of bindings) {
     if (seenBindings.has(name)) continue;
     seenBindings.add(name);
     if (isUnused(name)) {
-      const lineNum = findElementLine(instance, element.outerHTML);
-      warnUnusedDeclaration(lineNum !== null ? `${displayName}:${lineNum}` : displayName, "binding", name);
+      const lineNum = findElementLine(module.source, element.outerHTML);
+      warnUnusedDeclaration(
+        lineNum !== null ? `${module.id}:${lineNum}` : module.id,
+        "binding",
+        name
+      );
     }
   }
 }
 
-export function processComponentElement(
-  element,
-  cx,
-  renderChain = [],
-  sourceFile,
-  sourceContent,
-  globalCtx = {}
-) {
-  const tagName = element.tagName.toLowerCase();
-  const compName = tagName + ".html";
-  const displayName = resolveDisplayName(compName, cx);
-  let instance = cx.loadedComponents.get(compName);
+/**
+ * Copy top-level script declarations into the server render context so
+ * templates can interpolate them.
+ */
+function applyTopLevelContext(module, ctx) {
+  const script = module.script;
+  if (!script) return;
 
-  if (!instance || instance === undefined) return false;
-  if (renderChain && renderChain.includes(compName)) return false;
+  const parsed = parseScript(script);
+  const proxy = new Proxy(ctx, {
+    has() {
+      return true;
+    },
+    get(target, key) {
+      return target[key];
+    },
+  });
 
-  instance = protectCurlyBraces(instance);
-  const dom = parseHTML(instance);
-  const doc = dom.document;
-  let script = doc.querySelector("script")?.innerHTML;
-  let template = doc.querySelector("template")?.innerHTML;
-  let styles = doc.querySelector("style")?.innerHTML;
-
-   if (!template) {
-    return false;
-  }
-
-  let cssId = cx.cssScopesMap && cx.cssScopesMap.get(compName);
-  if (!cssId) {
-    cssId = deterministicHash(compName, 8);
-    cx.cssScopesMap.set(compName, cssId);
-  }
-
-  // Store original script for reachability (before stripping)
-  const originalScriptForReach = script;
-  if (script) {
-    const parsed = parseScript(script);
-    if (parsed.ast && parsed.imports.length > 0) {
-      // Determine needed imports via reachability (Step B) - Feature flag
-      let importsToGenerate = parsed.imports;
-      if (cx.treeShakeRuntime === false) {
-        // keep all imports when tree-shaking disabled
-      } else if (parsed.runtimeNode) {
-        const reachForImports = computeReachable(parsed, { bindings: [] });
-        if (!reachForImports.fallback) {
-          const neededSet = new Set(reachForImports.neededImports);
-          importsToGenerate = parsed.imports.filter(imp => neededSet.has(imp));
-        }
-      } else {
-        // No runtime -> no client imports needed (server-only)
-        importsToGenerate = [];
-      }
-      for (const imp of importsToGenerate) {
-        const isComponent = imp.source.toLowerCase().endsWith(".html");
-        if (!isComponent) {
+  if (parsed.ast) {
+    for (const variable of parsed.topVars) {
+      if (variable.isDestructuring) {
+        if (variable.names.every((name) => name in ctx)) continue;
+        if (variable.value === undefined) {
+          for (const name of variable.names) {
+            if (!(name in ctx)) ctx[name] = undefined;
+          }
           continue;
         }
-        const importedCompName = path.basename(imp.source).toLowerCase();
-        if (cx.loadedComponents.has(importedCompName)) {
-          if (imp.specifiers.length === 0) {
-            generateCSRClass(importedCompName, cx);
-          } else {
-            for (const spec of imp.specifiers) {
-              generateCSRClass(importedCompName, cx, spec.local);
-            }
-          }
-        }
-      }
-      const sorted = [...parsed.imports].sort((a, b) => b.start - a.start);
-      for (const imp of sorted) {
-        script = script.slice(0, imp.start) + script.slice(imp.end);
-      }
-    } else if (parsed.parseError) {
-      const importRegex = /import\s+(\w+)\s+from\s+['"]([^'"]+)['"]\s*;?\s*/g;
-      script = script.replace(importRegex, (_, importedName, importPath) => {
-        const importedCompName = path.basename(importPath).toLowerCase();
-        if (cx.loadedComponents.has(importedCompName)) {
-          generateCSRClass(importedCompName, cx, importedName);
-        }
-        return "";
-      });
-    }
-  }
-
-  const compProps = extractPropsDefaults(script);
-
-  let ctx;
-  if (cx.staticCtxRegistry && cx.staticCtxRegistry.has(element)) {
-    ctx = cx.staticCtxRegistry.get(element);
-  } else {
-    ctx = extractCtxFromEl(element, globalCtx);
-    if (globalCtx && typeof globalCtx === "object") {
-      for (const [k, v] of Object.entries(globalCtx)) {
-        if (!(k in ctx)) ctx[k] = v;
-      }
-    }
-    cx.staticCtxRegistry && cx.staticCtxRegistry.set(element, ctx);
-  }
-
-  if (compProps.length > 0) {
-    compProps.forEach(({ name, defaultValue }) => {
-      if (defaultValue !== undefined && !(name in ctx)) {
         try {
-          ctx[name] = compileExpr(defaultValue, false)();
+          const initValue = compileExpr(variable.value, true)(proxy);
+          const fnBody = `${variable.keyword} ${variable.name} = initVal; return {${variable.names.join(", ")}};`;
+          const result = new Function("initVal", fnBody)(initValue);
+          for (const name of variable.names) {
+            if (!(name in ctx)) ctx[name] = result[name];
+          }
         } catch {
-          ctx[name] = defaultValue;
+          // Leave unresolved values out of the context.
+        }
+      } else {
+        const { name, value } = variable;
+        if (name in ctx) continue;
+        if (value !== undefined) {
+          try {
+            ctx[name] = compileExpr(value, true)(proxy);
+          } catch {
+            // Leave unresolved values out of the context.
+          }
+        } else if (!(name in ctx)) {
+          ctx[name] = undefined;
         }
       }
+    }
+
+    for (const src of parsed.topFuncs) {
+      try {
+        const fn = (0, eval)("(" + src + ")");
+        const name = fn.name;
+        if (name && !(name in ctx)) ctx[name] = fn;
+      } catch {
+        // Ignore declarations that cannot be evaluated on the server.
+      }
+    }
+    return;
+  }
+
+  // Acorn fallback: use the conservative regex-derived declarations.
+  for (const { name, value } of extractTopLevelVariables(script)) {
+    if (name in ctx) continue;
+    if (value !== undefined) {
+      try {
+        ctx[name] = compileExpr(value, true)(proxy);
+      } catch {
+        // Leave unresolved values out of the context.
+      }
+    }
+  }
+  for (const src of extractTopLevelFunctions(script, RUNTIME_KW)) {
+    try {
+      const fn = (0, eval)("(" + src + ")");
+      const name = fn.name;
+      if (name && !(name in ctx)) ctx[name] = fn;
+    } catch {
+      // Ignore declarations that cannot be evaluated on the server.
+    }
+  }
+}
+
+function runtimeReach(module, cx, bindingNames) {
+  if (!module.script) return null;
+  const parsed = parseScript(module.script);
+  const runtime = parsed.runtime || extractRuntime(module.script, module.id);
+  if (!runtime) return null;
+
+  let reach = null;
+  if (cx.treeShakeRuntime !== false && parsed.ast) {
+    reach = computeReachable(parsed, { bindings: bindingNames });
+    if (reach.fallback) reach = null;
+  }
+
+  return { parsed, runtime, reach };
+}
+
+function extractInlineRuntimeContext(script) {
+  const match = script?.match(/ctx\s*=\s*({.*?})/);
+  if (!match) return {};
+  try {
+    return JSON.parse(match[1].replace(/(\w+):/g, '"$1":'));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Build a runtime function body for either the server hydration chunk
+ * (`mode: "server"`) or a CSR class (`mode: "csr"`).
+ *
+ * Server hydration resolves `bind:` targets through their rendered
+ * `data-chbind-*` attributes. CSR classes receive those values from the
+ * `ChocolaComponent` binding collector through `ctx`.
+ *
+ * @returns {{ namedSource: string, csrSource: string }|null}
+ */
+function buildRuntimeSource(module, cx, bindings, mode) {
+  const bindingNames = bindings.map((binding) =>
+    typeof binding === "string" ? binding : binding.varName
+  );
+  const info = runtimeReach(module, cx, bindingNames);
+  if (!info) return null;
+
+  const { runtime, reach } = info;
+  const script = module.script || "";
+  const compProps =
+    module.compProps && module.compProps.length > 0
+      ? module.compProps
+      : extractPropsDefaults(script);
+  const topVars = extractTopLevelVariables(script);
+  const topFuncs = extractTopLevelFunctions(script, RUNTIME_KW);
+
+  let injectProps = compProps;
+  let injectVars = topVars;
+  let injectFuncs = topFuncs;
+  let injectBindings = bindings;
+  let csrBindingNames = bindingNames;
+
+  if (reach) {
+    const neededPropNames = new Set(reach.neededProps.map((prop) => prop.name));
+    const neededVarNames = new Set(
+      reach.neededVars.flatMap((variable) => variable.names)
+    );
+    const neededBindingNames = new Set(reach.neededBindings);
+    const neededFuncNames = new Set(
+      reach.neededFuncs
+        .map(
+          (src) =>
+            src.match(
+              /^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/
+            )?.[1]
+        )
+        .filter(Boolean)
+    );
+
+    injectProps = compProps.filter((prop) => neededPropNames.has(prop.name));
+    injectVars = topVars.filter((variable) =>
+      neededVarNames.has(variable.name)
+    );
+    injectFuncs = topFuncs.filter((src) => {
+      const name = src.match(
+        /^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/
+      )?.[1];
+      return name && neededFuncNames.has(name);
+    });
+    injectBindings = bindings.filter((binding) =>
+      typeof binding === "string"
+        ? neededBindingNames.has(binding)
+        : neededBindingNames.has(binding.varName)
+    );
+    csrBindingNames = bindingNames.filter((name) =>
+      neededBindingNames.has(name)
+    );
+  }
+
+  const runtimeCtx = extractInlineRuntimeContext(script);
+  const declared = new Set(Object.keys(runtimeCtx));
+  let inject = "";
+
+  for (const [key, value] of Object.entries(runtimeCtx)) {
+    inject += `let ${key} = ctx.${key}??${JSON.stringify(value)};\n`;
+  }
+
+  for (const { name, defaultValue } of injectProps) {
+    if (declared.has(name)) continue;
+    inject +=
+      defaultValue !== undefined
+        ? `let ${name} = ctx.${name}??(${defaultValue});\n`
+        : `let ${name} = ctx.${name};\n`;
+    declared.add(name);
+  }
+
+  for (const name of bindingNames) declared.add(name);
+
+  for (const { keyword, name, value } of injectVars) {
+    if (declared.has(name)) continue;
+    inject +=
+      value !== undefined
+        ? `${keyword} ${name} = ${value};\n`
+        : `${keyword} ${name};\n`;
+    declared.add(name);
+  }
+
+  if (mode === "csr") {
+    for (const name of csrBindingNames) {
+      if (name === "self") continue;
+      inject += `let ${name} = ctx.${name};\n`;
+    }
+  } else {
+    for (const binding of injectBindings) {
+      if (typeof binding === "string") continue;
+      if (binding.varName === "self") continue;
+      const accessor = binding.prop === "self" ? "" : "." + binding.prop;
+      inject += `let ${binding.varName} = self.querySelector('[data-chbind-${binding.bindId}]')${accessor};\n`;
+    }
+  }
+
+  if (injectFuncs.length > 0) {
+    inject += "\n" + injectFuncs.join("\n\n") + "\n";
+  }
+
+  const injected = runtime.replace(
+    /\$runtime\([^)]*\)\s*\{/,
+    (match) => match + "\n" + inject
+  );
+  const namedSource = injected.replace(
+    /\$runtime\([^)]*\)/,
+    `${module.fnId}(self, ctx)`
+  );
+  const csrSource = namedSource.replace(
+    /^(async\s+)?function\s+\w+/,
+    "$1function"
+  );
+
+  return { namedSource, csrSource };
+}
+
+/**
+ * Generate a CSR class for every module with a template.
+ */
+export function generateAllCSRClasses(graph, cx) {
+  for (const id of [...graph.modules.keys()].sort()) {
+    const module = graph.moduleById(id);
+    if (module.template) generateCSRClass(module, cx);
+  }
+}
+
+/**
+ * Generate a `ChocolaComponent` subclass for one module.
+ *
+ * @param {import("./module-graph.js").ChocolaModule} module
+ * @param {ProcessContext} cx
+ */
+export function generateCSRClass(module, cx) {
+  if (!module || !module.template) return;
+
+  const canonical = canonicalClassName(module);
+  cx.classNames.set(module.id, canonical);
+
+  const key = `${module.id}#${canonical}`;
+  if (cx.csrClasses.has(key) || cx.csrGenerating.has(module.id)) return;
+  cx.csrGenerating.add(module.id);
+
+  const doc = cx.doc;
+  const cssId = cx.cssScopesMap.get(module.id) || module.cssId;
+  cx.cssScopesMap.set(module.id, cssId);
+
+  const protectedTemplate = protectCurlyBraces(module.template);
+  const template = scopeTemplateHtml(protectedTemplate, cssId, doc);
+  const templateFragment = parseFragment(protectedTemplate, doc);
+
+  const childMappings = [];
+  const seenTags = new Set();
+  for (const el of templateFragment.querySelectorAll("*")) {
+    const tag = el.tagName.toLowerCase();
+    if (seenTags.has(tag)) continue;
+    seenTags.add(tag);
+
+    const child = resolveModuleForTag(module, tag, cx.graph);
+    if (!child || !child.template) continue;
+
+    generateCSRClass(child, cx);
+    childMappings.push({
+      tag,
+      compClass: findImportLocal(module, child.id, tag) || canonicalClassName(child),
     });
   }
 
-  const topFuncSrc = extractTopLevelFunctions(script || "", RUNTIME_KW);
-  const topVars = extractTopLevelVariables(script || "");
-  // Server resolution: evaluate all top-level declarations into ctx for template rendering
-  // Use AST-derived parsed data when available to correctly handle destructuring and comma declarators
-  // Use ctx-aware evaluation so initializers can reference earlier ctx vars (e.g., let a = x + y)
-  const ctxProxyForServer = new Proxy(ctx, { has() { return true; }, get(t,k){ return t[k]; } });
-  if (originalScriptForReach) {
-    const parsedForServer = parseScript(originalScriptForReach);
-    if (parsedForServer.ast) {
-      for (const v of parsedForServer.topVars) {
-        if (v.isDestructuring) {
-          if (v.names.every(n => n in ctx)) continue;
-          if (v.value === undefined) {
-            for (const n of v.names) if (!(n in ctx)) ctx[n] = undefined;
-            continue;
-          }
-          try {
-            const initVal = compileExpr(v.value, true)(ctxProxyForServer);
-            const fnBody = `${v.keyword} ${v.name} = initVal; return {${v.names.join(", ")}};`;
-            const result = new Function("initVal", fnBody)(initVal);
-            for (const n of v.names) if (!(n in ctx)) ctx[n] = result[n];
-          } catch {}
-        } else {
-          const { name, value } = v;
-          if (name in ctx) continue;
-          if (value !== undefined) {
-            try { ctx[name] = compileExpr(value, true)(ctxProxyForServer); } catch {}
-          } else {
-            if (!(name in ctx)) ctx[name] = undefined;
-          }
-        }
-      }
-      for (const src of parsedForServer.topFuncs) {
-        try {
-          const fn = (0, eval)("(" + src + ")");
-          const name = fn.name;
-          if (name && !(name in ctx)) ctx[name] = fn;
-        } catch {}
-      }
-    } else {
-      // Fallback to shim evaluation (ctx-aware for inter-var deps)
-      for (const { name, value } of topVars) {
-        if (name in ctx) continue;
-        if (value !== undefined) {
-          try { ctx[name] = compileExpr(value, true)(ctxProxyForServer); } catch {}
-        }
-      }
-      for (const src of topFuncSrc) {
-        try { const fn = (0, eval)("(" + src + ")"); const name = fn.name; if (name && !(name in ctx)) ctx[name] = fn; } catch {}
-      }
+  if (!cx.usedImports.has(module.id)) {
+    const namespaceLocals = new Set(module.namespaceMap.keys());
+    cx.usedImports.set(
+      module.id,
+      (module.imports || [])
+        .filter((imp) => !isChjsSource(imp.source))
+        .filter(
+          (imp) =>
+            !(imp.specifiers || []).some(
+              (specifier) =>
+                specifier.type === "namespace" &&
+                specifier.local &&
+                namespaceLocals.has(specifier.local.toLowerCase())
+            )
+        )
+        .map((imp) => imp.raw)
+    );
+  }
+
+  if (module.styles && !cx.styleModules.has(module.id)) {
+    cx.styleModules.add(module.id);
+    cx.scopedStyles.push(scopeCss(module.styles, cssId));
+  }
+
+  const bindingNames = collectBindingNames(templateFragment);
+  const runtimeParts = buildRuntimeSource(module, cx, bindingNames, "csr");
+
+  if (
+    runtimeParts &&
+    !cx.runtimeFunctions.has(module.id) &&
+    cx.moduleBindings.has(module.id)
+  ) {
+    const serverParts = buildRuntimeSource(
+      module,
+      cx,
+      cx.moduleBindings.get(module.id),
+      "server"
+    );
+    if (serverParts) cx.runtimeFunctions.set(module.id, serverParts.namedSource);
+  }
+
+  const propsPart =
+    module.compProps && module.compProps.length > 0
+      ? `{ ${module.compProps
+          .map(
+            ({ name, defaultValue }) =>
+              `${JSON.stringify(name)}: ${
+                defaultValue !== undefined ? defaultValue : "null"
+              }`
+          )
+          .join(", ")} }`
+      : "{}";
+  const runtimePart = runtimeParts
+    ? `,\n      runtime: ${runtimeParts.csrSource}`
+    : "";
+  const childrenPart =
+    childMappings.length > 0
+      ? ",\n      children: [" +
+        childMappings
+          .map(({ tag, compClass }) => `{tag:"${tag}",compClass:${compClass}}`)
+          .join(",") +
+        "]"
+      : "";
+
+  const classDef =
+    `class ${canonical} extends ChocolaComponent {\n` +
+    `  constructor() {\n` +
+    `    super({\n` +
+    `      template: \`${escapeForTemplateLiteral(template)}\`,\n` +
+    `      hash: "${cssId}",\n` +
+    `      props: ${propsPart}${runtimePart}${childrenPart}\n` +
+    `    });\n` +
+    `  }\n` +
+    `}`;
+
+  cx.csrGenerating.delete(module.id);
+  cx.csrClasses.set(key, classDef);
+}
+
+/**
+ * Render one module instance.
+ *
+ * @param {import("./module-graph.js").ChocolaModule} module
+ * @param {Element|null} usageElement null for the root component
+ * @param {ProcessContext} cx
+ * @param {string[]} renderChain module ids already being rendered
+ * @param {string|null} sourceFile owner module id, for errors
+ * @param {string|null} sourceContent owner template, for errors
+ * @param {object} globalCtx
+ * @returns {DocumentFragment|Element|false}
+ */
+export function renderInstance(
+  module,
+  usageElement,
+  cx,
+  renderChain = [],
+  sourceFile = null,
+  sourceContent = null,
+  globalCtx = {}
+) {
+  if (!module) return false;
+  if (renderChain.includes(module.id)) return false;
+
+  const doc = cx.doc;
+
+  // Script-only components render nothing: remove a usage element, or return
+  // an empty fragment at the root.
+  if (!module.template) {
+    if (usageElement) {
+      usageElement.remove();
+      return false;
     }
+    return doc.createDocumentFragment();
+  }
+
+  const chain = renderChain.concat(module.id);
+  const cssId = module.cssId || deterministicHash(module.id, 8);
+  cx.cssScopesMap.set(module.id, cssId);
+
+  let ctx;
+  if (usageElement && cx.staticCtxRegistry.has(usageElement)) {
+    ctx = cx.staticCtxRegistry.get(usageElement);
   } else {
-    for (const { name, value } of topVars) {
-      if (name in ctx) continue;
-      if (value !== undefined) {
-        try { ctx[name] = compileExpr(value, true)(ctxProxyForServer); } catch {}
+    ctx = usageElement ? extractCtxFromEl(usageElement, globalCtx) : {};
+    if (globalCtx && typeof globalCtx === "object") {
+      for (const [key, value] of Object.entries(globalCtx)) {
+        if (!(key in ctx)) ctx[key] = value;
       }
     }
-    for (const src of topFuncSrc) {
-      try { const fn = (0, eval)("(" + src + ")"); const name = fn.name; if (name && !(name in ctx)) ctx[name] = fn; } catch {}
+    if (usageElement) cx.staticCtxRegistry.set(usageElement, ctx);
+  }
+
+  const compProps =
+    module.compProps && module.compProps.length > 0
+      ? module.compProps
+      : extractPropsDefaults(module.script);
+
+  for (const { name, defaultValue } of compProps) {
+    if (defaultValue !== undefined && !(name in ctx)) {
+      try {
+        ctx[name] = compileExpr(defaultValue, false)();
+      } catch {
+        ctx[name] = defaultValue;
+      }
     }
   }
 
-  const elInnerHtml = element.innerHTML;
+  applyTopLevelContext(module, ctx);
 
   const ctxProxy = new Proxy(ctx, {
-    has() { return true; },
-    get(target, key) { return target[key]; }
+    has() {
+      return true;
+    },
+    get(target, key) {
+      return target[key];
+    },
   });
 
-  const fragment = parseFragment(template, doc);
+  const protectedTemplate = protectCurlyBraces(module.template);
+  const fragment = parseFragment(protectedTemplate, doc);
   tagDescendants(fragment, cssId);
 
-  warnUnusedDeclarations(cx, compName, instance, script, fragment);
+  warnUnusedDeclarations(cx, module, fragment);
 
-  const slotFragment = parseFragment(elInnerHtml, doc);
-  if (sourceFile) {
-    validateChainStructure(slotFragment, sourceFile, sourceContent, elInnerHtml);
+  const projectedHtml = usageElement ? usageElement.innerHTML : "";
+  const slotFragment = usageElement
+    ? parseFragment(projectedHtml, doc)
+    : doc.createDocumentFragment();
+
+  if (usageElement && sourceFile) {
+    validateChainStructure(slotFragment, sourceFile, sourceContent, projectedHtml);
   }
-  validateChainStructure(fragment, instance.__sourceFile || displayName, instance, template);
-  Array.from(fragment.querySelectorAll("slot")).forEach(slot => {
-    slot.replaceWith(slotFragment);
-  });
+  validateChainStructure(fragment, module.id, module.source, module.template);
 
-  const childEntries = Array.from(fragment.querySelectorAll("*")).map(el => ({
+  for (const slot of [...fragment.querySelectorAll("slot")]) {
+    slot.replaceWith(...slotFragment.childNodes);
+  }
+
+  const childEntries = Array.from(fragment.querySelectorAll("*")).map((el) => ({
     el,
-    parent: el.parentNode
+    parent: el.parentNode,
   }));
   const condChains = new Map();
   const bindings = [];
@@ -493,17 +762,10 @@ export function processComponentElement(
 
   const conditionalLocations = new Map();
   for (const { el } of childEntries) {
-    if (!el.hasAttribute("if") && !hasMountIf(el) && !el.hasAttribute("elif")) continue;
-    let location = sourceFile;
-    if (instance) {
-      const lineNum = findElementLine(instance, el.outerHTML);
-      if (lineNum !== null) location = `${displayName}:${lineNum}`;
+    if (!el.hasAttribute("if") && !hasMountIf(el) && !el.hasAttribute("elif")) {
+      continue;
     }
-    if (location === sourceFile && sourceContent) {
-      const lineNum = findElementLine(sourceContent, el.outerHTML);
-      if (lineNum !== null) location = `${sourceFile}:${lineNum}`;
-    }
-    conditionalLocations.set(el, location);
+    conditionalLocations.set(el, findElementLocation(module, el));
   }
 
   childEntries.forEach(({ el: child, parent }) => {
@@ -519,8 +781,8 @@ export function processComponentElement(
     const hasElse = child.hasAttribute("else");
 
     if (hasIf || hasDelIf || hasElif) {
-      const location = conditionalLocations.get(child) || sourceFile;
-      const stripBraces = (raw) => raw.startsWith("{") ? raw.slice(1, -1) : raw;
+      const location = conditionalLocations.get(child) || module.id;
+      const stripBraces = (raw) => (raw.startsWith("{") ? raw.slice(1, -1) : raw);
       const tag = child.tagName.toLowerCase();
       const warnIfConstant = (expr, attr) => {
         const { constant, value } = evaluateConstant(expr);
@@ -533,13 +795,15 @@ export function processComponentElement(
 
     if (hasElif || hasElse) {
       if (!condChain.active) {
-        throwError(`${instance.__sourceFile || displayName}: <${child.tagName.toLowerCase()}> has ${hasElif ? "elif" : "else"} without a preceding if/mount:if sibling`);
+        throwError(
+          `${module.id}: <${child.tagName.toLowerCase()}> has ${
+            hasElif ? "elif" : "else"
+          } without a preceding if/mount:if sibling`
+        );
       }
       if (condChain.rendered) {
         child.remove();
-        if (hasElse) {
-          condChain.active = false;
-        }
+        if (hasElse) condChain.active = false;
         return;
       }
     }
@@ -548,23 +812,19 @@ export function processComponentElement(
       if (hasElif || hasElse) {
         if (hasElif) {
           const expr = child.getAttribute("elif").slice(1, -1);
-          const fn = compileExpr(expr, true);
-          if (!fn(ctxProxy)) {
+          if (!compileExpr(expr, true)(ctxProxy)) {
             child.remove();
             return;
           }
         }
         child.replaceWith(...child.children);
         condChain.rendered = true;
-        if (hasElse) {
-          condChain.active = false;
-        }
+        if (hasElse) condChain.active = false;
       } else if (hasIf || hasDelIf) {
         const raw = hasIf ? child.getAttribute("if") : getMountIf(child);
         const expr = raw.slice(1, -1);
-        const fn = compileExpr(expr, true);
         condChain.active = true;
-        if (fn(ctxProxy)) {
+        if (compileExpr(expr, true)(ctxProxy)) {
           child.replaceWith(...child.children);
           condChain.rendered = true;
         } else {
@@ -579,60 +839,69 @@ export function processComponentElement(
       return;
     }
 
-    Array.from(child.attributes).forEach(attribute => {
-      if (!attribute || attribute === undefined) return;
-      if (reservedAttrs.includes(attribute.name)) return;
+    for (const attribute of [...child.attributes]) {
+      if (!attribute) continue;
+      if (reservedAttrs.includes(attribute.name)) continue;
 
       if (attribute.name.startsWith("bind:")) {
         const prop = attribute.name.slice(5);
         const varName = attribute.value;
         let bindId = elBindIds.get(child);
         if (!bindId) {
-          bindId = "b" + (bindCounter++);
+          bindId = "b" + bindCounter++;
           elBindIds.set(child, bindId);
           child.setAttribute("data-chbind-" + bindId, "");
         }
         bindings.push({ prop, varName, bindId });
         child.removeAttribute(attribute.name);
-        return;
+        continue;
       }
 
       child.setAttribute(
         attribute.name,
-        attribute.value.replace(
-          /\{([^}]+)\}/g,
-          (_, expr) => {
-            try {
-              return compileExpr(expr, true)(ctxProxy);
-            } catch {
-              return "";
-            }
+        attribute.value.replace(/\{([^}]+)\}/g, (_, expr) => {
+          try {
+            return compileExpr(expr, true)(ctxProxy);
+          } catch {
+            return "";
           }
-        )
+        })
       );
-    });
+    }
 
-    const childCompName = child.tagName.toLowerCase() + ".html";
-    const nextChain = renderChain.concat(compName);
-    const isComponentNode = cx.loadedComponents.has(childCompName) && !nextChain.includes(childCompName);
+    const childTag = child.tagName.toLowerCase();
+    const childModule = resolveModuleForTag(module, childTag, cx.graph);
+    const isComponentNode = Boolean(childModule);
 
     // Apply the conditional to a child component before rendering it. A false
-    // mount:if/elif removes the element, and if we rendered first we would have
-    // already emitted a runtime binding (and a chid) for a component that never
-    // reaches the output — an orphaned selector that breaks hydration.
+    // mount:if/elif removes the element, and rendering first would emit an
+    // orphaned runtime binding for a component that never reaches the output.
     if (isComponentNode) {
-      applyConditionalToElement(child, ctxProxy, condChain, hasIf, hasDelIf, hasElif, hasElse);
+      applyConditionalToElement(
+        child,
+        ctxProxy,
+        condChain,
+        hasIf,
+        hasDelIf,
+        hasElif,
+        hasElse
+      );
       if (!child.parentNode) return;
     }
 
-    const processed = processComponentElement(
-      child,
-      cx,
-      nextChain,
-      displayName,
-      template,
-      globalCtx
-    );
+    let processed = false;
+    if (isComponentNode) {
+      processed = renderInstance(
+        childModule,
+        child,
+        cx,
+        chain,
+        module.id,
+        module.template,
+        globalCtx
+      );
+      if (!child.parentNode) return;
+    }
 
     let condTarget = child;
     if (processed && processed.nodeType === 1) {
@@ -640,266 +909,226 @@ export function processComponentElement(
     }
 
     if (!isComponentNode) {
-      applyConditionalToElement(condTarget, ctxProxy, condChain, hasIf, hasDelIf, hasElif, hasElse);
+      applyConditionalToElement(
+        condTarget,
+        ctxProxy,
+        condChain,
+        hasIf,
+        hasDelIf,
+        hasElif,
+        hasElse
+      );
     }
 
-    interpolateNode(condTarget, ctxProxy)
+    interpolateNode(condTarget, ctxProxy);
   });
 
-  let csrRuntimeSource = null;
-  const firstChild = fragment.children[0];
+  if (!cx.moduleBindings.has(module.id)) {
+    cx.moduleBindings.set(module.id, bindings);
+  }
 
-  if (firstChild && firstChild.nodeType === 1) {
-    if (script) {
-      const ctxRegex = /ctx\s*=\s*({.*?})/;
-      const ctxMatch = script.match(ctxRegex);
-      let runtimeCtx = {};
-      if (ctxMatch) {
-        try {
-          runtimeCtx = JSON.parse(ctxMatch[1].replace(/(\w+):/g, '"$1":'));
-        } catch (e) {
-          runtimeCtx = {};
-        }
-      }
-      const ctxDefParts = [];
-      const declared = new Set();
-      for (const [key, value] of Object.entries(runtimeCtx)) {
-        ctxDefParts.push(`let ${key} = ctx.${key}??${JSON.stringify(value)};\n`);
-        declared.add(key);
-      }
+  const firstChild = fragment.firstElementChild;
+  const runtimeInfo = runtimeReach(
+    module,
+    cx,
+    bindings.map((binding) => binding.varName)
+  );
 
-      for (const { name, defaultValue } of compProps) {
-        if (declared.has(name)) continue;
-        if (defaultValue !== undefined) {
-          ctxDefParts.push(`let ${name} = ctx.${name}??(${defaultValue});\n`);
-        } else {
-          ctxDefParts.push(`let ${name} = ctx.${name};\n`);
-        }
-      }
+  if (runtimeInfo && firstChild) {
+    const existingChid = firstChild.getAttribute("chid");
+    const compId =
+      existingChid ||
+      "chid-" + deterministicHash(module.id + ":" + cx.compIdColl.length, 8);
 
-      const ctxDef = ctxDefParts.join("");
+    if (!existingChid) {
+      cx.compIdColl.push(compId);
+      firstChild.setAttribute("chid", compId);
+    }
 
-      script = script.replace(ctxRegex, "ctx");
-
-      let runtime = extractRuntime(script, displayName);
-
-      if (runtime) {
-        // Only a component that actually hydrates needs a chid. Assigning one
-        // for a runtime-less component (e.g. a layout page whose template root
-        // is another component) would clobber the child's chid while the child's
-        // runtime call still targets the original value.
-        const existingChid = firstChild.getAttribute("chid");
-        const compId = existingChid || "chid-" + deterministicHash(compName + ":" + cx.compIdColl.length, 8);
-        if (!existingChid) {
-          cx.compIdColl.push(compId);
-          firstChild.setAttribute("chid", compId);
-        }
-
-        let fnEntry = cx.runtimeMap && cx.runtimeMap.get(compName);
-        let fnId;
-        if (!fnEntry) {
-          fnId = runtimeFunctionId(compName);
-          // Step B: filter to client-reachable declarations - Feature flag
-          let reachInject = null;
-          if (cx.treeShakeRuntime !== false && originalScriptForReach) {
-            const parsedReach = parseScript(originalScriptForReach);
-            if (parsedReach.ast) {
-              const bindNames = bindings.map(b => b.varName);
-              reachInject = computeReachable(parsedReach, { bindings: bindNames });
-               if (reachInject.fallback) {
-                 reachInject = null;
-              }
-            }
-          }
-          // Prepare filtered sets
-          let compPropsToInject = compProps;
-          let topVarsToInject = topVars;
-          let bindingsToInject = bindings;
-          let topFuncsToInject = topFuncSrc;
-          if (reachInject) {
-            const neededPropNames = new Set(reachInject.neededProps.map(p => p.name));
-            const neededVarNames = new Set(reachInject.neededVars.flatMap(v => v.names));
-            const neededBindingSet = new Set(reachInject.neededBindings);
-            const neededFuncNames = new Set(reachInject.neededFuncs.map(src => {
-              const m = src.match(/^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/);
-              return m ? m[1] : null;
-            }).filter(Boolean));
-            // Rebuild ctxDef filtered to needed props (inject only reachable props)
-            // Note: declared handling below will be updated to use filtered props
-            compPropsToInject = compProps.filter(p => neededPropNames.has(p.name));
-            topVarsToInject = topVars.filter(v => neededVarNames.has(v.name));
-            bindingsToInject = bindings.filter(b => neededBindingSet.has(b.varName));
-            topFuncsToInject = topFuncSrc.filter(src => {
-              const m = src.match(/^(?:async\s+)?function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)/);
-              return m && neededFuncNames.has(m[1]);
-            });
-            // Rebuild ctxDef to only include reachable props
-            // declared already has runtimeCtx keys; now add only needed props
-            // Recreate ctxDef parts filtered
-            const ctxDefPartsFiltered = [];
-            const declaredForCtx = new Set(Object.keys(runtimeCtx));
-            for (const { name, defaultValue } of compPropsToInject) {
-              if (declaredForCtx.has(name)) continue;
-              if (defaultValue !== undefined) {
-                ctxDefPartsFiltered.push(`let ${name} = ctx.${name}??(${defaultValue});\n`);
-              } else {
-                ctxDefPartsFiltered.push(`let ${name} = ctx.${name};\n`);
-              }
-              declaredForCtx.add(name);
-            }
-            // Prepend runtimeCtx parts (already in ctxDefParts) but we need to reconstruct
-            // Simpler: rebuild ctxDef from scratch filtered
-            const runtimeCtxParts = [];
-            for (const [k,v] of Object.entries(runtimeCtx)) {
-              runtimeCtxParts.push(`let ${k} = ctx.${k}??${JSON.stringify(v)};\n`);
-            }
-            const filteredCtxDef = runtimeCtxParts.join("") + ctxDefPartsFiltered.join("");
-            // Use filtered ctxDef for injection
-            // declared set for topVars should include runtimeCtx + needed props + bindingsToInject
-            // We'll set injectCode later using filteredCtxDef
-            // Override ctxDef and declared handling
-            // Store for later use
-            reachInject._filteredCtxDef = filteredCtxDef;
-            reachInject._compPropsToInject = compPropsToInject;
-            reachInject._topVarsToInject = topVarsToInject;
-            reachInject._bindingsToInject = bindingsToInject;
-            reachInject._topFuncsToInject = topFuncsToInject;
-          }
-
-          let injectCode;
-          let effectiveTopVars;
-          let effectiveBindings;
-          let effectiveFuncs;
-          if (reachInject && reachInject._filteredCtxDef !== undefined) {
-            injectCode = reachInject._filteredCtxDef;
-            // declared for topVars filtering should include runtimeCtx + needed props + needed bindings
-            const filteredDeclared = new Set([...Object.keys(runtimeCtx), ...reachInject._compPropsToInject.map(p=>p.name), ...reachInject._bindingsToInject.map(b=>b.varName)]);
-            effectiveTopVars = reachInject._topVarsToInject.filter(v => !filteredDeclared.has(v.name));
-            effectiveBindings = reachInject._bindingsToInject;
-            effectiveFuncs = reachInject._topFuncsToInject;
-          } else {
-            injectCode = ctxDef;
-            for (const b of bindings) declared.add(b.varName);
-            effectiveTopVars = topVars.filter(v => !declared.has(v.name));
-            effectiveBindings = bindings;
-            effectiveFuncs = topFuncSrc;
-          }
-          if (effectiveTopVars.length > 0) {
-            injectCode += "\n" + effectiveTopVars.map(v => v.value !== undefined
-              ? `${v.keyword} ${v.name} = ${v.value};`
-              : `${v.keyword} ${v.name};`
-            ).join("\n") + "\n";
-          }
-          if (effectiveBindings.length > 0) {
-            injectCode += "\n" + effectiveBindings.map(b => {
-              const accessor = b.prop === "self" ? "" : "." + b.prop;
-              return "let " + b.varName + " = self.querySelector('[data-chbind-" + b.bindId + "]')" + accessor + ";";
-            }).join("\n") + "\n";
-          }
-          if (effectiveFuncs.length > 0) {
-            injectCode += "\n" + effectiveFuncs.join("\n\n") + "\n";
-          }
-          runtime = runtime.replace(/\$runtime\([^)]*\)\s*\{/, match => match + "\n" + injectCode);
-
-          runtime = runtime.replace(`${RUNTIME_KW}()`, `${fnId}(self, ctx)`);
-          csrRuntimeSource = runtime.replace(/^function\s+\w+/, "function");
-          cx.runtimeChunks.push(runtime);
-          cx.runtimeMap && cx.runtimeMap.set(compName, { fnId });
-        } else {
-          fnId = fnEntry.fnId;
-        }
-
-        cx.runtimeChunks.push(`${fnId}(document.querySelector('[chid="${compId}"]'), ${JSON.stringify(ctx)});`);
+    if (!cx.runtimeMap.has(module.id)) {
+      const parts = buildRuntimeSource(module, cx, bindings, "server");
+      if (parts) {
+        cx.runtimeFunctions.set(module.id, parts.namedSource);
+        cx.runtimeChunks.push(parts.namedSource);
+        cx.runtimeMap.set(module.id, {
+          fnId: module.fnId || runtimeFunctionId(module.id),
+          chunkName: null,
+        });
       }
     }
+
+    cx.runtimeCalls.push({
+      moduleId: module.id,
+      fnId: module.fnId || runtimeFunctionId(module.id),
+      chid: compId,
+      ctxJson: serializeRuntimeContext(ctx),
+    });
   }
 
-  if (fragment.children.length === 1 && firstChild.nodeType === 1) {
+  if (fragment.children.length === 1 && firstChild) {
     firstChild.classList.add(cssId);
   }
-  if (styles) {
-    styles = scopeCss(styles, cssId);
-    cx.scopedStyles.push(styles);
-  }
 
-  if (csrRuntimeSource && !cx.csrClasses.has(compName)) {
-    generateCSRClass(compName, cx);
-  }
-
-  if (element.style.display === "none" && firstChild && firstChild.nodeType === 1) {
+  if (
+    usageElement &&
+    usageElement.style &&
+    usageElement.style.display === "none" &&
+    firstChild
+  ) {
     firstChild.style.display = "none";
   }
 
-  element.replaceWith(fragment);
-  return firstChild && firstChild.nodeType === 1 ? firstChild : true;
+  if (module.styles && !cx.styleModules.has(module.id)) {
+    cx.styleModules.add(module.id);
+    cx.scopedStyles.push(scopeCss(module.styles, cssId));
+  }
+
+  if (usageElement) {
+    usageElement.replaceWith(fragment);
+    return firstChild || true;
+  }
+
+  return fragment;
 }
 
-export function processAllComponents(appElements, loadedComponents, pageSourceFile, pageSourceContent, globalCtx = {}, treeShakeRuntime = true, originalNames = null) {
-  const cx = new ProcessContext(
-    loadedComponents, [], [], new Map(), [], new Map(), [], new Map(), new Map(), treeShakeRuntime, originalNames
-  );
+function serializeRuntimeContext(ctx) {
+  const seen = new WeakSet();
+  try {
+    const json = JSON.stringify(ctx, (key, value) => {
+      if (typeof value === "function") return undefined;
+      if (typeof value === "object" && value !== null) {
+        if (typeof value.nodeType === "number") return undefined;
+        if (seen.has(value)) return undefined;
+        seen.add(value);
+      }
+      return value;
+    });
+    return json || "{}";
+  } catch {
+    return "{}";
+  }
+}
 
-  for (const [compName, instance] of cx.loadedComponents) {
-    const scriptMatch = instance.match(/<script>([\s\S]*?)<\/script>/i);
-    if (scriptMatch) {
-      const scriptContent = scriptMatch[1];
-      const parsed = parseScript(scriptContent);
-      if (parsed.ast) {
-        let importsToGenerate = parsed.imports;
-        if (cx.treeShakeRuntime === false) {
-          // keep all when disabled
-        } else if (parsed.runtimeNode) {
-          const reach = computeReachable(parsed, { bindings: [] });
-          if (!reach.fallback) {
-            const neededSet = new Set(reach.neededImports);
-            importsToGenerate = parsed.imports.filter(imp => neededSet.has(imp));
-          }
-        } else {
-          importsToGenerate = [];
+/**
+ * Thin wrapper around `renderInstance` used by the template walker.
+ */
+export function processComponentElement(
+  element,
+  cx,
+  renderChain = [],
+  ownerModule = cx.graph.root,
+  globalCtx = {}
+) {
+  const childModule = resolveModuleForTag(
+    ownerModule,
+    element.tagName.toLowerCase(),
+    cx.graph
+  );
+  if (!childModule) return false;
+
+  return renderInstance(
+    childModule,
+    element,
+    cx,
+    renderChain,
+    ownerModule.id,
+    ownerModule.template,
+    globalCtx
+  );
+}
+
+function hasModuleChunk(module, cx) {
+  return Boolean(module?.template && cx.classNames.has(module.id));
+}
+
+function resolveImportedModule(module, imp, graph) {
+  const sourcePath = path.resolve(path.dirname(module.sourcePath), imp.source);
+  for (const candidate of graph.modules.values()) {
+    if (candidate.sourcePath === sourcePath) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Build the metadata consumed by `generateRuntime()`.
+ *
+ * - one entry per module with a CSR class or `$runtime`;
+ * - non-`.chjs` imports preserved verbatim;
+ * - `.chjs` imports replaced by canonical class imports.
+ */
+export function buildModuleChunks(graph, cx) {
+  const chunks = [];
+
+  for (const id of [...graph.modules.keys()].sort()) {
+    const module = graph.moduleById(id);
+    const canonical = cx.classNames.get(id) || null;
+    const classSource = canonical
+      ? cx.csrClasses.get(`${id}#${canonical}`) || null
+      : null;
+    const runtimeSource = cx.runtimeFunctions.get(id) || null;
+
+    if (!classSource && !runtimeSource) continue;
+
+    const componentImports = [];
+    const sideEffectImports = [];
+    const seenImports = new Set();
+
+    for (const imp of module.imports || []) {
+      if (!isChjsSource(imp.source)) continue;
+
+      const specifiers = imp.specifiers || [];
+      if (specifiers.length === 0) {
+        const child = resolveImportedModule(module, imp, graph);
+        if (child && hasModuleChunk(child, cx)) {
+          sideEffectImports.push(child.id);
         }
-        for (const imp of importsToGenerate) {
-          const isComponent = imp.source.toLowerCase().endsWith(".html");
-          if (!isComponent) continue;
-          const importedCompName = path.basename(imp.source).toLowerCase();
-          if (cx.loadedComponents.has(importedCompName)) {
-            if (imp.specifiers.length === 0) {
-              generateCSRClass(importedCompName, cx);
-            } else {
-              for (const spec of imp.specifiers) {
-                generateCSRClass(importedCompName, cx, spec.local);
-              }
-            }
-          }
-        }
-      } else {
-        const importRegex = /import\s+(\w+)\s+from\s+['"]([^'"]+)['"]\s*;?\s*/g;
-        let match;
-        while ((match = importRegex.exec(scriptContent)) !== null) {
-          const importedName = match[1];
-          const importedCompName = path.basename(match[2]).toLowerCase();
-          if (cx.loadedComponents.has(importedCompName)) {
-            generateCSRClass(importedCompName, cx, importedName);
-          }
-        }
+        continue;
+      }
+
+      for (const specifier of specifiers) {
+        if (!specifier.local || specifier.type === "namespace") continue;
+        const childId = module.importMap.get(specifier.local.toLowerCase());
+        const child = childId ? graph.moduleById(childId) : null;
+        if (!child || !hasModuleChunk(child, cx)) continue;
+
+        const key = `${child.id}#${specifier.local}`;
+        if (seenImports.has(key)) continue;
+        seenImports.add(key);
+        componentImports.push({
+          childId: child.id,
+          local: specifier.local,
+          canonical: canonicalClassName(child),
+        });
       }
     }
+
+    if (module.template) {
+      for (const tag of scanTemplateTags(module.template)) {
+        if (!tag.lowerName.includes(":")) continue;
+        const child = resolveModuleForTag(module, tag.lowerName, graph);
+        if (!child || !hasModuleChunk(child, cx)) continue;
+
+        const key = `${child.id}#`;
+        if (seenImports.has(key)) continue;
+        seenImports.add(key);
+        componentImports.push({
+          childId: child.id,
+          local: null,
+          canonical: canonicalClassName(child),
+        });
+      }
+    }
+
+    chunks.push({
+      id,
+      canonical,
+      classSource,
+      runtimeSource,
+      imports: cx.usedImports.get(id) || [],
+      componentImports,
+      sideEffectImports,
+    });
   }
 
-  appElements.forEach(el => {
-    if (!el.isConnected) return;
-    processComponentElement(el, cx, [], pageSourceFile, pageSourceContent, globalCtx);
-  });
-  const runtimeScript = cx.runtimeChunks.join("\n");
-  const hasComponents = cx.runtimeChunks.length > 0;
-  const scopesCss = cx.scopedStyles.join("\n");
-  const csrClasses = [...cx.csrClasses.values()].join("\n\n");
-
-  const hashMap = {};
-  for (const [compName, hash] of cx.cssScopesMap) {
-    hashMap[compName] = hash;
-  }
-
-  return { runtimeScript, hasComponents, scopesCss, hashMap, csrClasses };
+  return chunks;
 }
-
-const RUNTIME_KW = "$runtime";
