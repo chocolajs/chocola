@@ -1,63 +1,57 @@
 import path from "path";
 import { promises as fs } from "fs";
-import { parseHTML } from "linkedom";
-import { loadConfig, resolvePaths } from "./config.js";
-import { getComponents, getSrcIndex } from "./pipeline.js";
-import { protectCurlyBraces } from "../utils.js";
-import { deterministicHash, runtimeFunctionId } from "./utils.js";
-import { createDOM, getAssetLinks, getScriptElements } from "./dom-processor.js";
-import {
-  extractPropsDefaults, extractTopLevelFunctions, extractTopLevelVariables, parseScript, computeReachable,
-} from "../parser/index.js";
+import { normalizeConfig } from "./config.js";
+import { parseModuleSource, scanTemplateTags } from "./module-source.js";
+import { isStaticTag, suggestTag } from "./tags.js";
 
-const RUNTIME_KW = "$runtime";
-const PAGE_ID = "index.html";
+const COMPONENT_EXTENSION = ".chjs";
+
+function isChjsSource(source) {
+  return typeof source === "string" && source.toLowerCase().endsWith(COMPONENT_EXTENSION);
+}
+
+function toModuleId(rootDir, sourcePath) {
+  return path.relative(rootDir, sourcePath).split(path.sep).join("/");
+}
+
+function stripChjsExtension(relativePath) {
+  return relativePath.replace(/\.chjs$/i, "");
+}
 
 export class ChocolaModule {
-  constructor({ id, kind, sourcePath, source, mtimeMs }) {
+  constructor({ id, sourcePath, source, isRoot = false }) {
     this.id = id;
-    this.kind = kind;
     this.sourcePath = sourcePath;
+    this.isRoot = isRoot;
     this.source = source;
-    this.mtimeMs = mtimeMs;
-    this.compName = kind === "component" ? path.basename(id) : null;
-    this.deps = new Set();
-    this.parsed = false;
     this.script = null;
     this.template = null;
+    this.templateStartLine = null;
     this.styles = null;
+    this.imports = [];
+    this.importMap = new Map();
+    this.namespaceMap = new Map();
+    this.deps = new Set();
     this.compProps = [];
     this.topFuncs = [];
     this.topVars = [];
-    this.imports = [];
-    this.neededClientImports = [];
     this.cssId = null;
     this.fnId = null;
   }
 }
 
 export class ModuleGraph {
-  constructor(rootDir, config, paths) {
+  constructor(rootDir, config) {
     this.rootDir = rootDir;
+    this.entry = null;
     this.config = config;
-    this.paths = paths;
+    this.root = null;
     this.modules = new Map();
-    this.components = new Map();
-    this.loadedComponents = new Map();
-    this.originalComponentNames = new Map();
-    this.page = null;
   }
 
   addModule(module) {
     this.modules.set(module.id, module);
-    if (module.kind === "component") {
-      this.components.set(module.compName, module);
-      this.loadedComponents.set(module.compName, module.source);
-    }
-  }
-
-  component(compName) {
-    return this.components.get(compName);
+    return module;
   }
 
   moduleById(id) {
@@ -65,184 +59,278 @@ export class ModuleGraph {
   }
 }
 
-async function getFileMtime(filePath) {
+async function readSource(sourcePath, message) {
   try {
-    return (await fs.stat(filePath)).mtimeMs;
+    return await fs.readFile(sourcePath, "utf-8");
   } catch {
-    return null;
+    throw new Error(message);
   }
 }
 
-function isExternalUrl(url) {
-  return url.startsWith("http://") || url.startsWith("https://");
-}
+async function loadDependency(graph, owner, sourcePath, displaySource, queue) {
+  const id = toModuleId(graph.rootDir, sourcePath);
+  const existing = graph.moduleById(id);
+  if (existing) return existing;
 
-function compileComponentModule(module, graph) {
-  if (module.parsed) return module;
-
-  const dom = parseHTML(protectCurlyBraces(module.source));
-  const doc = dom.document;
-  module.script = doc.querySelector("script")?.innerHTML ?? null;
-  module.template = doc.querySelector("template")?.innerHTML ?? null;
-  module.styles = doc.querySelector("style")?.innerHTML ?? null;
-  module.compProps = extractPropsDefaults(module.script);
-  module.topFuncs = extractTopLevelFunctions(module.script || "", RUNTIME_KW);
-  module.topVars = extractTopLevelVariables(module.script || "");
-  module.cssId = deterministicHash(module.compName, 8);
-  module.fnId = runtimeFunctionId(module.compName);
-
-  const deps = new Set();
-  if (module.script) {
-    const parsed = parseScript(module.script);
-    if (parsed.ast) {
-      module.imports = parsed.imports;
-      let importsForDeps = parsed.imports;
-      const treeShake = graph.config.treeShakeRuntime !== false;
-      if (treeShake && parsed.runtimeNode) {
-        const reach = computeReachable(parsed, { bindings: [] });
-        if (!reach.fallback) {
-          const neededSet = new Set(reach.neededImports);
-          importsForDeps = parsed.imports.filter(imp => neededSet.has(imp));
-        }
-        module.neededClientImports = importsForDeps;
-      } else if (!treeShake) {
-        // Feature flag disabled: include all imports for deps
-        importsForDeps = parsed.imports;
-        module.neededClientImports = importsForDeps;
-      } else {
-        importsForDeps = [];
-        module.neededClientImports = [];
-      }
-      for (const imp of importsForDeps) {
-        const isComponent = imp.source.toLowerCase().endsWith(".html");
-        if (!isComponent) {
-          // Phase 1: JS imports that are client-reachable are warned in component-processor (render-time)
-          // to avoid duplicate warnings at graph build time. Silently skip for deps.
-          continue;
-        }
-        const importedCompName = path.basename(imp.source).toLowerCase();
-        const importedModule = graph.component(importedCompName);
-        if (importedModule) deps.add(importedModule.id);
-      }
-      // Template deps added below will cover component usage in template even when
-      // script import is not client-reachable (server-only).
-      // Keep full import list in module.imports for reference.
-    } else {
-      // Fallback to regex for scripts that failed to parse (e.g., syntax errors)
-      module.imports = [];
-      module.neededClientImports = [];
-      const importRegex = /import\s+(\w+)\s+from\s+['"]([^'"]+)['"]\s*;?\s*/g;
-      let match;
-      while ((match = importRegex.exec(module.script)) !== null) {
-        const importedCompName = path.basename(match[2]).toLowerCase();
-        const importedModule = graph.component(importedCompName);
-        if (importedModule) deps.add(importedModule.id);
-      }
-    }
-  } else {
-    module.imports = [];
-    module.neededClientImports = [];
-  }
-  if (module.template) {
-    const frag = parseHTML(module.template).document;
-    for (const el of frag.querySelectorAll("*")) {
-      const childModule = graph.component(el.tagName.toLowerCase() + ".html");
-      if (childModule) deps.add(childModule.id);
-    }
-  }
-  module.deps = deps;
-  module.parsed = true;
+  const source = await readSource(
+    sourcePath,
+    `Cannot resolve import "${displaySource}" from ${owner.id}`
+  );
+  const module = new ChocolaModule({ id, sourcePath, source, isRoot: false });
+  graph.addModule(module);
+  queue.push(module);
   return module;
 }
 
-function scanComponentDeps(root, graph) {
-  const deps = new Set();
-  for (const el of root.querySelectorAll("*")) {
-    const childModule = graph.component(el.tagName.toLowerCase() + ".html");
-    if (childModule) deps.add(childModule.id);
-  }
-  return deps;
-}
+async function listChjsFiles(dir) {
+  const files = [];
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  entries.sort((a, b) => a.name.localeCompare(b.name));
 
-function scanAssetModules(doc, graph) {
-  const deps = new Set();
-  const { stylesheets, icons } = getAssetLinks(doc);
-  const scripts = getScriptElements(doc);
-
-  const collect = (href) => {
-    if (isExternalUrl(href)) return;
-    const id = href.split("\\").join("/");
-    const existing = graph.moduleById(id);
-    if (existing) {
-      deps.add(id);
-      return;
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listChjsFiles(fullPath)));
+    } else if (entry.isFile() && entry.name.toLowerCase().endsWith(COMPONENT_EXTENSION)) {
+      files.push(fullPath);
     }
-    const asset = new ChocolaModule({
-      id,
-      kind: "asset",
-      sourcePath: path.join(graph.paths.src, href),
-      source: null,
-      mtimeMs: null,
-    });
-    graph.addModule(asset);
-    deps.add(id);
-  };
+  }
 
-  for (const link of stylesheets) collect(link.href);
-  for (const link of icons) collect(link.href);
-  for (const script of scripts) collect(script.getAttribute("src"));
-
-  return deps;
+  return files;
 }
 
-export async function buildModuleGraph(rootDir, { overrides } = {}) {
-  const config = overrides ? await loadConfig(rootDir, { silent: true, overrides }) : await loadConfig(rootDir);
-  const paths = resolvePaths(rootDir, config);
+async function collectNamespace(dir, graph, owner, queue) {
+  const components = new Map();
+  const moduleIds = new Set();
+  const files = await listChjsFiles(dir);
 
-  const graph = new ModuleGraph(rootDir, config, paths);
+  for (const file of files) {
+    const relPath = stripChjsExtension(
+      path.relative(dir, file).split(path.sep).join("/")
+    );
+    const key = relPath.toLowerCase();
+    const child = await loadDependency(graph, owner, file, relPath, queue);
 
-  const indexFiles = await getSrcIndex(paths.src);
-  const pageModule = new ChocolaModule({
-    id: PAGE_ID,
-    kind: "page",
-    sourcePath: indexFiles.srcPath,
-    source: indexFiles.srcHtmlFile,
-    mtimeMs: await getFileMtime(indexFiles.srcPath),
+    const existingId = components.get(key);
+    if (existingId && existingId !== child.id) {
+      throw new Error(
+        `Ambiguous namespace component "${relPath}" in ${owner.id}: "${existingId}" and "${child.id}"`
+      );
+    }
+
+    components.set(key, child.id);
+    moduleIds.add(child.id);
+    owner.deps.add(child.id);
+  }
+
+  return { components, moduleIds };
+}
+
+async function processImports(module, graph, queue) {
+  const importLocalNames = new Map();
+  const namespaceNames = new Map();
+
+  for (const imp of module.imports) {
+    const specifiers = imp.specifiers || [];
+
+    if (isChjsSource(imp.source)) {
+      if (specifiers.some((specifier) => specifier.type === "namespace")) {
+        throw new Error(`Namespace import "${imp.source}" must point to a directory`);
+      }
+
+      const sourcePath = path.resolve(path.dirname(module.sourcePath), imp.source);
+      const child = await loadDependency(graph, module, sourcePath, imp.source, queue);
+      module.deps.add(child.id);
+
+      for (const specifier of specifiers) {
+        if (specifier.type !== "default" && specifier.type !== "named") continue;
+        if (!specifier.local) continue;
+        const local = specifier.local.toLowerCase();
+        module.importMap.set(local, child.id);
+        importLocalNames.set(local, specifier.local);
+      }
+      continue;
+    }
+
+    const namespaceSpecifiers = specifiers.filter(
+      (specifier) => specifier.type === "namespace"
+    );
+    if (namespaceSpecifiers.length === 0) continue;
+
+    const namespaceDir = path.resolve(path.dirname(module.sourcePath), imp.source);
+    let stat = null;
+    try {
+      stat = await fs.stat(namespaceDir);
+    } catch {
+      stat = null;
+    }
+
+    if (!stat || !stat.isDirectory()) {
+      // A trailing slash makes the directory intent explicit; a namespace import
+      // of a regular JS module stays a host concern and is preserved verbatim.
+      if (imp.source.endsWith("/") || imp.source.endsWith(path.sep)) {
+        throw new Error(`Namespace import "${imp.source}" must point to a directory`);
+      }
+      continue;
+    }
+
+    for (const specifier of namespaceSpecifiers) {
+      if (!specifier.local) continue;
+      const local = specifier.local.toLowerCase();
+      const existing = namespaceNames.get(local);
+
+      if (existing) {
+        if (existing.dir !== namespaceDir) {
+          throw new Error(
+            `Namespace prefix <${specifier.local}> is imported from both "${existing.source}" and "${imp.source}" in ${module.id}`
+          );
+        }
+        continue;
+      }
+
+      const { components, moduleIds } = await collectNamespace(
+        namespaceDir,
+        graph,
+        module,
+        queue
+      );
+      module.namespaceMap.set(local, { dir: namespaceDir, components, moduleIds });
+      namespaceNames.set(local, {
+        dir: namespaceDir,
+        source: imp.source,
+        local: specifier.local,
+      });
+    }
+  }
+
+  for (const [local, namespace] of namespaceNames) {
+    if (importLocalNames.has(local)) {
+      throw new Error(
+        `Namespace prefix <${namespace.local}> collides with import <${importLocalNames.get(local)}> in ${module.id}`
+      );
+    }
+  }
+}
+
+function namespaceSuggestionCandidates(module, graph) {
+  const candidates = [];
+
+  for (const imp of module.imports) {
+    if (!isChjsSource(imp.source)) continue;
+    for (const specifier of imp.specifiers || []) {
+      if (specifier.type !== "default" && specifier.type !== "named") continue;
+      if (specifier.local) candidates.push(specifier.local);
+    }
+  }
+
+  for (const [prefixLower, namespace] of module.namespaceMap) {
+    let prefix = prefixLower;
+    for (const imp of module.imports) {
+      const match = (imp.specifiers || []).find(
+        (specifier) =>
+          specifier.type === "namespace" &&
+          specifier.local &&
+          specifier.local.toLowerCase() === prefixLower
+      );
+      if (match) {
+        prefix = match.local;
+        break;
+      }
+    }
+
+    for (const moduleId of namespace.moduleIds) {
+      const child = graph.moduleById(moduleId);
+      if (!child) continue;
+      const relPath = stripChjsExtension(
+        path.relative(namespace.dir, child.sourcePath).split(path.sep).join("/")
+      );
+      candidates.push(`${prefix}:${relPath}`);
+    }
+  }
+
+  return candidates;
+}
+
+function unknownComponentError(module, tag, graph) {
+  let message = `Unknown component <${tag.rawName}> in ${module.id}:${tag.line}. Did you forget to import it?`;
+  const suggestion = suggestTag(tag.rawName, namespaceSuggestionCandidates(module, graph));
+  if (suggestion) message += ` Did you mean <${suggestion}>?`;
+  return new Error(message);
+}
+
+function processTemplateTags(module, graph) {
+  if (!module.template) return;
+
+  const lineOffset = (module.templateStartLine || 1) - 1;
+  for (const tag of scanTemplateTags(module.template, { lineOffset })) {
+    const childId = module.importMap.get(tag.lowerName);
+    if (childId) {
+      module.deps.add(childId);
+      continue;
+    }
+
+    if (tag.lowerName.includes(":")) {
+      const [prefix, ...rest] = tag.lowerName.split(":");
+      const namespace = module.namespaceMap.get(prefix);
+      if (namespace) {
+        const namespaceId = namespace.components.get(rest.join("/"));
+        if (namespaceId) {
+          module.deps.add(namespaceId);
+          continue;
+        }
+        throw unknownComponentError(module, tag, graph);
+      }
+    }
+
+    if (isStaticTag(tag.lowerName)) continue;
+
+    throw unknownComponentError(module, tag, graph);
+  }
+}
+
+/**
+ * Build an import-only module graph for a `.chjs` root component.
+ *
+ * @param {string} rootDir absolute project root
+ * @param {{entry?: string, config?: object}} [options]
+ * @returns {Promise<ModuleGraph>}
+ */
+export async function buildModuleGraph(rootDir, options = {}) {
+  if (typeof rootDir !== "string" || !path.isAbsolute(rootDir)) {
+    throw new Error(`rootDir must be an absolute path (received "${rootDir}")`);
+  }
+
+  const { entry, config } = options || {};
+  if (typeof entry !== "string" || entry.length === 0) {
+    throw new Error('entry is required; pass { entry: "<path to root .chjs>" }');
+  }
+
+  if (!entry.toLowerCase().endsWith(COMPONENT_EXTENSION)) {
+    throw new Error(`entry must point to a .chjs component (received "${entry}")`);
+  }
+
+  const rootPath = path.resolve(rootDir, entry);
+  const rootSource = await readSource(rootPath, `Cannot read entry "${entry}"`);
+
+  const graph = new ModuleGraph(rootDir, normalizeConfig(config));
+  const root = new ChocolaModule({
+    id: toModuleId(rootDir, rootPath),
+    sourcePath: rootPath,
+    source: rootSource,
+    isRoot: true,
   });
-  graph.addModule(pageModule);
-  graph.page = pageModule;
 
-  const foundComponents = await getComponents(paths.components);
-  const { loadedComponents, originalNames, componentsLib, emptyComps } = foundComponents;
+  graph.addModule(root);
+  graph.root = root;
+  graph.entry = root.id;
 
-  for (const filename of componentsLib) {
-    const compName = filename.toLowerCase();
-    const source = loadedComponents.get(compName);
-    if (source === undefined) continue;
-    const id = path.posix.join(config.libDir, compName);
-    const module = new ChocolaModule({
-      id,
-      kind: "component",
-      sourcePath: path.join(paths.components, filename),
-      source,
-      mtimeMs: await getFileMtime(path.join(paths.components, filename)),
-    });
-    graph.addModule(module);
+  const queue = [root];
+  while (queue.length > 0) {
+    const module = queue.shift();
+    parseModuleSource(module);
+    await processImports(module, graph, queue);
+    processTemplateTags(module, graph);
   }
-
-  // Track original filename casing for log display (fallback to lowercase tag)
-  graph.originalComponentNames = originalNames;
-
-  for (const module of graph.modules.values()) {
-    if (module.kind === "component") compileComponentModule(module, graph);
-  }
-
-  const pageDom = createDOM(pageModule.source);
-  const pageDeps = scanComponentDeps(pageDom.document, graph);
-  for (const dep of scanAssetModules(pageDom.document, graph)) {
-    pageDeps.add(dep);
-  }
-  pageModule.deps = pageDeps;
 
   return graph;
 }

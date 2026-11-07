@@ -122,16 +122,7 @@ function findBlockClose(source, from, lowerName) {
   return null;
 }
 
-/**
- * Split a `.chjs` source into raw section contents.
- *
- * Returns the first `<script>`, `<template>`, and `<style>` block of each kind.
- * Contents are returned verbatim (no HTML parsing or rewriting).
- *
- * @param {string} source
- * @returns {{script:string|null,template:string|null,styles:string|null}}
- */
-export function splitComponentSource(source) {
+function splitComponentSourceDetailed(source) {
   const result = { script: null, template: null, styles: null };
   if (typeof source !== "string" || source.length === 0) return result;
 
@@ -153,22 +144,56 @@ export function splitComponentSource(source) {
     }
 
     if (tag.selfClosing) {
-      if (result[key] === null) result[key] = "";
+      if (result[key] === null) result[key] = { content: "", start: tag.end };
       i = tag.end;
       continue;
     }
 
     const close = findBlockClose(source, tag.end, tag.lowerName);
     if (!close) {
-      if (result[key] === null) result[key] = source.slice(tag.end);
+      if (result[key] === null) {
+        result[key] = { content: source.slice(tag.end), start: tag.end };
+      }
       break;
     }
 
-    if (result[key] === null) result[key] = source.slice(tag.end, close.contentEnd);
+    if (result[key] === null) {
+      result[key] = {
+        content: source.slice(tag.end, close.contentEnd),
+        start: tag.end,
+      };
+    }
     i = close.end;
   }
 
   return result;
+}
+
+/**
+ * Split a `.chjs` source into raw section contents.
+ *
+ * Returns the first `<script>`, `<template>`, and `<style>` block of each kind.
+ * Contents are returned verbatim (no HTML parsing or rewriting).
+ *
+ * @param {string} source
+ * @returns {{script:string|null,template:string|null,styles:string|null}}
+ */
+export function splitComponentSource(source) {
+  const detailed = splitComponentSourceDetailed(source);
+  return {
+    script: detailed.script ? detailed.script.content : null,
+    template: detailed.template ? detailed.template.content : null,
+    styles: detailed.styles ? detailed.styles.content : null,
+  };
+}
+
+function lineAtIndex(source, index) {
+  let line = 1;
+  const end = Math.min(index, source.length);
+  for (let i = 0; i < end; i++) {
+    if (source[i] === "\n") line++;
+  }
+  return line;
 }
 
 function toLowerSet(values) {
@@ -294,12 +319,14 @@ function skipInterpolation(source, start) {
  * interpolations, and script/style regions are skipped.
  *
  * @param {string} templateSource
+ * @param {{lineOffset?: number}} [options] offset added to returned line numbers
  * @returns {Array<{rawName:string, lowerName:string, index:number, line:number}>}
  */
-export function scanTemplateTags(templateSource) {
+export function scanTemplateTags(templateSource, options = {}) {
   const tags = [];
   if (typeof templateSource !== "string" || templateSource.length === 0) return tags;
 
+  const lineOffset = Number.isFinite(options.lineOffset) ? options.lineOffset : 0;
   let i = 0;
   let lineCursor = 0;
   let line = 1;
@@ -308,7 +335,7 @@ export function scanTemplateTags(templateSource) {
     for (; lineCursor < index; lineCursor++) {
       if (templateSource[lineCursor] === "\n") line++;
     }
-    return line;
+    return line + lineOffset;
   };
 
   while (i < templateSource.length) {
@@ -468,14 +495,19 @@ function collectTemplateBindings(imports) {
  * Pipeline: split raw sections -> parse script imports -> normalize self-closing
  * component tags -> store scripts/templates/styles -> compute hashes/declarations.
  *
- * @template {{ id:string, source:string, script?:any, template?:any, styles?:any,
- *   imports?:any, compProps?:any, topFuncs?:any, topVars?:any, cssId?:any, fnId?:any }} T
+ * @template {{ id:string, source:string, script?:any, template?:any, templateStartLine?:any,
+ *   styles?:any, imports?:any, compProps?:any, topFuncs?:any, topVars?:any, cssId?:any, fnId?:any }} T
  * @param {T} module
  * @returns {T}
  */
 export function parseModuleSource(module) {
   const source = typeof module?.source === "string" ? module.source : "";
-  const sections = splitComponentSource(source);
+  const detailed = splitComponentSourceDetailed(source);
+  const sections = {
+    script: detailed.script ? detailed.script.content : null,
+    template: detailed.template ? detailed.template.content : null,
+    styles: detailed.styles ? detailed.styles.content : null,
+  };
   const parsed = parseScript(sections.script);
 
   const imports =
@@ -490,6 +522,9 @@ export function parseModuleSource(module) {
     sections.template === null
       ? null
       : expandSelfClosingComponents(sections.template, { importLocals, namespacePrefixes });
+  module.templateStartLine = detailed.template
+    ? lineAtIndex(source, detailed.template.start)
+    : null;
   module.styles = sections.styles;
   module.imports = imports;
   module.compProps = extractPropsDefaults(sections.script);

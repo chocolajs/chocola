@@ -289,6 +289,7 @@ describe("module-source — parseModuleSource", () => {
     assert.deepEqual(module.compProps, [{ name: "name", defaultValue: '"x"' }]);
     assert.deepEqual(module.topFuncs, []);
     assert.deepEqual(module.topVars, []);
+    assert.equal(module.templateStartLine, 1);
     assert.equal(module.cssId, deterministicHash("app.chjs", 8));
     assert.equal(module.fnId, runtimeFunctionId("app.chjs"));
   });
