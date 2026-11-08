@@ -1,6 +1,6 @@
 ---
 name: performance-investigation
-description: Diagnose Chocola build/render regressions via the bench harness, isolate bottlenecks in module-graph/module-source/component-processor, and produce actionable fixes with before/after metrics
+description: Diagnose Chocola build/render regressions via the bench harness, isolate bottlenecks in module-graph/module-source/component-*, and produce actionable fixes with before/after metrics
 ---
 
 # Performance Investigation
@@ -9,7 +9,7 @@ description: Diagnose Chocola build/render regressions via the bench harness, is
 - Run the isolated bench harness (`bench/index.js` + `bench/worker.js`) to get reproducible medians/p95/p99 and memory peaks
 - Break down graph construction, parsing, render, and runtime descriptor generation to pinpoint regressions
 - Profile scaling dimensions (component count, nesting depth, root template size) via synthetic `.chjs` fixtures (`bench/fixtures.js`)
-- Identify hotspots in `compiler/module-graph.js`, `compiler/module-source.js`, `compiler/component-processor.js`, `compiler/render.js`, `parser/`, and `compiler/dom-processor.js`
+- Identify hotspots in `compiler/module-graph.js`, `compiler/module-source.js`, `compiler/component-render.js`, `compiler/component-runtime.js`, `compiler/component-csr.js`, `compiler/render.js`, `parser/`, and `compiler/dom-processor.js`
 - Propose minimal fixes and verify with before/after bench results
 
 ## When to use me
@@ -48,8 +48,8 @@ Compare the reference and scaling rows:
 | Step | Worker scenario | Underlying calls |
 |---|---|---|
 | `buildModuleGraph` | `scenarioBuild` | `parseModuleSource` (`compiler/module-source.js`) + import resolution/queue (`compiler/module-graph.js`) + `deterministicHash`/`runtimeFunctionId` (`compiler/utils.js`) |
-| `render` | `scenarioRender` | `renderInstance` recursion + conditional/slot handling + interpolation + `scopeCss` (`compiler/component-processor.js`, `parser/`) |
-| `render` (CSR side) | same | `generateAllCSRClasses` + `buildModuleChunks` + `generateRuntime` (`compiler/component-processor.js`, `compiler/runtime-generator.js`) |
+| `render` | `scenarioRender` | `renderInstance` recursion + conditional/slot handling + interpolation + `scopeCss` (`compiler/component-render.js`, `parser/`) |
+| `render` (CSR side) | same | `generateAllCSRClasses` + `buildModuleChunks` + `generateRuntime` (`compiler/component-csr.js`, `compiler/component-chunks.js`, `compiler/runtime-generator.js`) |
 | `compile` | `scenarioCompile` | graph build + render in one call (`compiler/index.js`) |
 
 Heuristics:
@@ -90,7 +90,7 @@ Output a concise markdown report:
 - Scaling signal (e.g. components=500 build median Xms → Yms)
 
 ## Root cause
-- File:line (e.g. compiler/component-processor.js scopeCss per element)
+- File:line (e.g. compiler/component-render.js renderInstance per-element walks)
 - Why it scales with <dimension>
 
 ## Fix

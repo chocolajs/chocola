@@ -121,7 +121,14 @@ compiler/index.js
   ├─ module-source.js     → raw section splitting, self-closing expansion, tag scanning
   ├─ tags.js              → static tag classification and suggestions
   ├─ render.js            → render(graph, ctx) — pure fragment + styles + runtime + hashMap
-  ├─ component-processor.js → ProcessContext, renderInstance, generateCSRClass, buildModuleChunks
+  ├─ component-processor.js → public barrel for the component modules below
+  ├─ component-context.js → ProcessContext, tag resolution, script context
+  ├─ component-render.js  → renderInstance, processComponentElement
+  ├─ component-runtime.js → runtime source generation and tree-shaking
+  ├─ component-csr.js     → CSR class generation
+  ├─ component-chunks.js  → ESM module chunk metadata
+  ├─ component-warnings.js → unused declaration and conditional warnings
+  ├─ component-utils.js   → shared component helpers
   ├─ dom-processor.js     → createRenderDocument, parseFragment, serializeFragment
   ├─ runtime-generator.js → generateRuntime — base, module, and DOMContentLoaded chunks
   └─ utils.js             → deterministic hashes and source-line lookup
