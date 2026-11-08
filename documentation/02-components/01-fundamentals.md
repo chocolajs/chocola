@@ -1,21 +1,19 @@
 ---
 title: Component fundamentals
-description: Anatomy of a Chocola component — body, styles, and script
+description: Anatomy of a Chocola component — template, script, and styles
 ---
 
 In Chocola, everything you build is a component. A component is a combination of HTML, CSS, and JavaScript logic that gets compiled and rendered into your app automatically. Components make your app modular, reusable, and easier to maintain.
 
-A component is a single `.html` file with up to three sections:
+A component is a single `.chjs` file with up to three sections, all optional:
 
 - `<template>` — the HTML markup.
-- `<style>` — scoped CSS (optional).
-- `<script>` — runtime logic and prop declarations (optional).
+- `<style>` — scoped CSS.
+- `<script>` — runtime logic and prop declarations.
 
 ```html
-<!-- file: MyComponent.html -->
+<!-- file: MyComponent.chjs -->
 <script>
-    let self;
-
     export let title = "Default";
     export let count = 0;
 
@@ -34,7 +32,7 @@ A component is a single `.html` file with up to three sections:
 </style>
 ```
 
-Only `<template>` is required — `<script>` and `<style>` are optional.
+A `.chjs` file containing only a `<script>` is valid and renders nothing. Components enter the graph only when another `.chjs` file imports them.
 
 ## `<template>` — HTML Markup
 
@@ -72,9 +70,11 @@ Use `:root` as a placeholder for the component's root element:
 </style>
 ```
 
+Scoped CSS is returned by the compiler as a string. The host decides whether to inline it, serve it as a file, or feed it into a bundler.
+
 ## `<script>` — Props and Runtime
 
-The `<script>` section has four roles:
+The `<script>` section has three roles:
 
 ### 1. Prop declarations with `export let`
 
@@ -90,7 +90,7 @@ Declare component props with optional default values:
 
 Props without a default value (like `title` above) default to `undefined` unless provided by the parent.
 
-### 2. Top-level variables
+### 2. Top-level variables and functions
 
 Any `let` or `const` declared at the top level of `<script>` becomes part of the component's context. Their values are available in template bindings and inside `$runtime`:
 
@@ -112,15 +112,7 @@ Any `let` or `const` declared at the top level of `<script>` becomes part of the
 
 Top-level variables are scoped to the component and won't leak. Use them for internal state that templates and `$runtime` can share. A parent-passed attribute with the same name takes precedence.
 
-### 3. Root element placeholder
-
-```js
-let self;
-```
-
-At compile-time, `self` is replaced with the component's actual root DOM element.
-
-### 4. Runtime function
+### 3. Runtime function
 
 ```js
 function $runtime() {
@@ -145,3 +137,20 @@ You can also declare helper functions at the top level of `<script>` and call th
     }
 </script>
 ```
+
+## Importing other components
+
+Use a component by importing it into the script of the file that renders it:
+
+```html
+<!-- file: app.chjs -->
+<script>
+    import Counter from "./Counter.chjs";
+</script>
+
+<template>
+    <Counter start={3} />
+</template>
+```
+
+The local import name becomes the tag name.

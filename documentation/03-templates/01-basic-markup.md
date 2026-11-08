@@ -3,22 +3,56 @@ title: Basic markup
 description: Attributes, props and bindings
 ---
 
-## Element Attributes
+## Tags
 
-Chocola supports standard HTML attributes plus custom ones. JavaScript expressions can be used in attributes by wrapping them with `{}`.
+Chocola uses HTML syntax for creating layouts. Lowercase tags like `<div>` denotes regular HTML tags, while uppercase tags like `<Widget>` indicates a _component_.
 
 ```html
-<div class="box {myClass ?? 'my-class'}"></div>
+<script>
+	import Widget from './Widget.chjs';
+</script>
+
+<template>
+  <div>
+    <Widget />
+  </div>  
+</template>
 ```
 
-> TIP: It's recommended to wrap expression bindings inside double quote marks (`""`) when used as attributes or props values to prevent JS syntax from breaking HTML parsing.
+## Element Attributes
+
+Attributes in Chocola work the same as HTML attributes.
+
+```html
+<div class="foo"></div>
+```
+
+They may be unquoted just like in HTML.
+
+```html
+<input type=checkbox />
+```
+
+Attribute values can contain JavaScript expressions.
+
+```html
+<a href="page/{p}">page {p}</a>
+```
+
+Or they can be JavaScript expressions.
+
+```html
+<button disabled="{!clickable}">...</button>
+```
+
+It's recommended to wrap expression bindings inside double quote marks (`""`) when used as attributes or props values to prevent JS syntax from breaking HTML parsing.
 
 ## Component Props
 
 Props are values passed to a component's context. They do not appear as HTML attributes in the DOM.
 
 ```html
-<MyComponent text="Some text" color="{myColor}" />
+<Widget text="Some text" color="{myColor}" />
 ```
 
 ## Text Interpolation

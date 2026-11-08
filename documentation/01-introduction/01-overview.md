@@ -3,31 +3,30 @@ title: Overview
 description: What is Chocola and why use it
 ---
 
-Chocola is a JavaScript library for building single-file components (SFCs) — a single `.html` file containing your template, logic, and styles.
+Chocola is a JavaScript library for building single-file components (SFCs) — a single `.chjs` file containing your template, logic, and styles.
 
 ```html
-<!-- file: Counter.html -->
+<!-- file: Counter.chjs -->
 <script>
-    let self;
-
     export let start = 0;
 
-    function $runtime() {
-        const btn = self.querySelector("button");
-        const number = self.querySelector(".number");
+    let number;
+    let button;
 
-        btn.addEventListener("click", () => {
+    function $runtime() {
+        let count = start;
+        number.textContent = count;
+
+        button.addEventListener("click", () => {
             count++;
             number.textContent = count;
-        })
+        });
     }
 </script>
 
 <template>
-    <button>Click me</button>
-    <div class="main">
-        <div class="number">{start}</div>
-    </div>
+    <button bind:self="button">Click me</button>
+    <div class="number" bind:self="number">{start}</div>
 </template>
 
 <style>

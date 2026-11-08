@@ -21,7 +21,6 @@ The runtime function receives access to component data and DOM elements. Use `se
 
 ```html
 <script>
-    let self;
     export let count = 0;
 
     function $runtime() {
@@ -48,7 +47,6 @@ You can declare functions and variables at the top level of `<script>` and call 
 <script>
     export let price = 58.645;
 
-    let self;
     let priceTag;
     let btn;
 

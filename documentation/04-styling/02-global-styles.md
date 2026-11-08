@@ -1,22 +1,12 @@
 ---
 title: Global styles
-description: Persistent styling throughout your page
+description: Host-managed styling for the whole document
 ---
 
-Global styles are applied site-wide. Include them in your HTML `<head>` using a `<link>`:
-
-```html
-<!-- file: index.html -->
-<html>
-  <head>
-    <link rel="stylesheet" href="path/to/styles.css">
-  </head>
-  <body>
-    <app></app>
-  </body>
-</html>
-```
+Global styles are applied site-wide. Chocola core does not discover, bundle, or write global CSS; that is the host's job.
 
 ### Interaction with Scoped Styles
 
-Scoped styles can override global styles for the elements inside a component, but you can also reference global CSS if needed.
+Scoped styles can override global styles for the elements inside a component, but components can also reference global CSS normally.
+
+Because Chocola returns scoped CSS only, global CSS ordering and cascade behavior remain under the host's control.

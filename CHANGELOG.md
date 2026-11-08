@@ -1,5 +1,36 @@
 # Chocola Changelog
 
+## Unreleased
+
+### Breaking changes
+
+- **Components are now `.chjs` files.** Rename every `.html` component to `.chjs`.
+- **Components must be imported where they are used.** Add an import for every component tag (`import Widget from './Widget.chjs'`); components are no longer discovered automatically from a folder.
+- **The core now only compiles components.** It builds your component tree and returns a rendered fragment, scoped styles, optional client scripts, and a map of component hashes. It no longer creates pages, copies assets, or writes files.
+  - Your app needs an explicit `.chjs` entry point.
+  - There is no `src/index.html`, no `<app>` container, and no built-in document shell.
+  - Your host assembles the final page and serves the result.
+- **Hosting tools own configuration and output.** Configuration discovery, routing, asset bundling, file writing, and hash files are no longer part of core.
+- **Client runtime is emitted as standard JavaScript modules**, with one module per component plus a small shared runtime.
+- **Component hashes are based on each component's path**, so two components with the same filename in different folders no longer collide.
+- **Imports of regular JavaScript modules are preserved** in the generated client scripts; core does not bundle them.
+- **Components containing only a `<script>` are valid** and render nothing.
+- **You can import a whole folder of components** (`import * as Lib from './lib/'`) and use tags such as `<Lib:Card>` and `<Lib:Sub:Thing>`.
+
+### Migration
+
+1. Rename components from `.html` to `.chjs`.
+2. Import every component you use.
+3. Update component imports in `$runtime` code to `.chjs` paths.
+4. Build from an explicit `.chjs` entry and render with request data.
+5. Let your host handle page assembly, output, routing, assets, and hash files.
+6. Remove old config paths such as `srcDir` and `libDir`.
+
+### Under the hood
+
+- Important refactor: the compiler now follows your component imports and renders in memory, without creating a build output.
+- Heavy code cleanup: removed the old page/build pipeline, dead helpers, and unused internal utilities.
+
 ## 2.0.0-next.12 (Oct 07, 2026)
 
 - Splitted Chocola into the main library (Chocola) and the metaframework ([ChocolaKit](https://github.com/chocolajs/kit)):

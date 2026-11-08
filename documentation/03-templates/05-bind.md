@@ -7,7 +7,6 @@ Use `bind:*` attributes to capture DOM element references or their properties di
 
 ```html
 <script>
-    let self;
     let input;
     let inputType;
 

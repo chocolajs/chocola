@@ -70,22 +70,6 @@ export function findElementLine(sourceContent, outerHTML) {
   return null;
 }
 
-export function genRandomId(collection = null, length = 10, lettersOnly = false) {
-  let id;
-  if (lettersOnly) {
-    id = Array.from({ length }, () => ID_LETTERS[Math.floor(Math.random) * ID_LETTERS.length]).join("");
-  } else {
-    id = Math.random().toString(36).substring(2, length + 2);
-  }
-  if (!collection) return id;
-  if (collection.includes(id)) {
-    return genRandomId(collection, length, lettersOnly);
-  } else {
-    collection.push(id);
-    return id;
-  }
-}
-
 export function deterministicHash(content, length = 8) {
   const hash = createHash("sha256").update(content).digest();
   let result = "";
@@ -98,5 +82,3 @@ export function deterministicHash(content, length = 8) {
 export function runtimeFunctionId(compName) {
   return "r_" + deterministicHash(compName, 8);
 }
-
-const ID_LETTERS = "abcdefghijklmnopqrstuvwxyz";
