@@ -264,7 +264,7 @@ class ChocolaComponent {
 
   #mountChildren(root) {
     for (const { tag, compClass } of this.#childComponents) {
-      const els = root.querySelectorAll(tag);
+      const els = root.getElementsByTagName(tag);
       for (const el of els) {
         const props = {};
         for (const attr of [...el.attributes]) {

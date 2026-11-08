@@ -68,13 +68,22 @@ Small pull requests are much easier to review and more likely to get merged.
 
 ### Installation
 
-Ensure you have [npm](https://nodejs.org/es/download/current) installed. After cloning the repository, run `npm install`.
+Ensure you have [pnpm](https://nodejs.org/es/download/current) installed. After cloning the repository, run `pnpm install`.
 
 ### Developing
 
-Once set, run `npm pack` to build a node package and test it in any project.
+Once set, run `pnpm pack` to build a node package and test it in any project.
 
-Try a build programmatically with `node -e "import('./compiler/index.js').then(m => m.app.build('.'))"` (dev server, SSR server, and CLI live in ChocolaKit, `@chocolajs/kit`, not in this repo).
+Try a build programmatically with:
+
+```js
+import { buildModuleGraph, render } from "chocola/compiler";
+
+const graph = await buildModuleGraph(process.cwd(), { entry: "app.chjs" });
+const { html, styles, runtime, hashMap } = await render(graph);
+```
+
+Or use `compile(rootDir, { entry, ctx })` for both steps. The core returns an in-memory fragment and runtime descriptors; writing files, assembling the document, and serving assets are host responsibilities. The dev server, SSR server, and CLI live in ChocolaKit (`@chocolajs/kit`), not in this repo.
 
 ### Creating a branch
 
@@ -92,7 +101,7 @@ All tests are located in the `/tests` folder.
 
 #### Running tests
 
-To run test, run `npm test`.
+To run test, run `pnpm test`.
 
 ### Style guide
 

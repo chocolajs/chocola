@@ -3,17 +3,16 @@ title: Getting started
 description: Set up a Chocola project from scratch
 ---
 
-It's recommended to use [ChocolaKit](https://github.com/chocolajs/kit) to build your web apps, or consuming Chocola with Vite for bigger projects.
+It's recommended to use [ChocolaKit](https://github.com/chocolajs/kit) to build your web apps, or consume Chocola directly with Vite or another host for bigger projects.
 
 To use ChocolaKit, create your project:
 
 ```
 my-app/
-└── src/
-    ├── lib/          # your components
-    ├── static/       # your static assets
-    ├── index.html    # your entry point
-    └── ...           # other files (scripts, styles, favicons, etc.)
+├── app.chjs          # root component
+├── lib/              # optional components
+│   └── Card.chjs
+└── ...               # other files your host serves or bundles
 ```
 
 Then run:
@@ -24,16 +23,24 @@ npm i @chocolajs/kit
 chjs dev
 ```
 
-This will setup your Node project, install ChocolaKit and start the dev server.
+This will set up your Node project, install ChocolaKit, and start the dev server.
 
-## Using ChocolaKit globally
+## Alternatives to ChocolaKit
 
-By installing ChocolaKit globally you will be able test, serve and build your Chocola apps anywhere without having a `package.json` or a `node_modules/`.
+Chocola is transport-agnostic. Any host can build a graph and render it:
 
-First, install ChocolaKit globally with
+```js
+import { buildModuleGraph, render } from "chocola/compiler";
 
+const graph = await buildModuleGraph(process.cwd(), { entry: "app.chjs" });
+const { html, styles, runtime, hashMap } = await render(graph, {
+    name: "Ada",
+});
 ```
-npm i -g @chocolajs/kit
-```
 
-Then, just open any Chocola project an run `chjs dev` to start the dev server. If the project includes a specified version of ChocolaKit, it will fallback to it instead of the globally installed version.
+`rootDir` must be absolute and `entry` must point to a `.chjs` file. There is no implicit `index.chjs` lookup.
+
+The result contains the rendered fragment, scoped CSS, ESM runtime descriptors, and the module-to-CSS hash map. Your host decides where to write those files, how to serve them, and what document shell to use.
+
+`compile(rootDir, { entry, config, ctx })` is available as a convenience when you want the graph and render in one call.
+

@@ -1,183 +1,75 @@
-import path from "path";
 import { promises as fs } from "fs";
+import { createRenderDocument, serializeFragment } from "./dom-processor.js";
 import {
-  createDOM,
-  validateAppContainer,
-  getAppElements,
-  getAssetLinks,
-  getScriptElements,
-  appendRuntimeScript,
-  appendStylesheetLink,
-  serializeDOM,
-} from "./dom-processor.js";
-import { processAllComponents } from "./component-processor.js";
-import { generateRuntimeScript } from "./runtime-generator.js";
-import { deterministicHash, throwError, warnConstantCondition, findElementLine } from "./utils.js";
-import { compileExpr, evaluateConstant, hasMountIf, getMountIf, removeMountIf } from "../parser/index.js";
-import {
-  processStylesheet,
-  processIcons,
-  processScript,
-  copyStaticDir,
-} from "./pipeline.js";
+  ProcessContext,
+  renderInstance,
+  generateAllCSRClasses,
+  buildModuleChunks,
+} from "./component-processor.js";
+import { generateRuntime } from "./runtime-generator.js";
 
-function processPageConditionals(parent, sourceFile, sourceContent, ctx = {}) {
-  const ctxProxy = new Proxy(ctx, {
-    has() { return true; },
-    get(target, key) { return target[key]; },
+let baseRuntimePromise = null;
+
+function readBaseRuntime() {
+  if (!baseRuntimePromise) {
+    baseRuntimePromise = fs.readFile(
+      new URL("../runtime/index.js", import.meta.url),
+      "utf-8"
+    );
+  }
+  return baseRuntimePromise;
+}
+
+/**
+ * Render a module graph to an in-memory result.
+ *
+ * The function is pure: it creates a fresh render document and context per
+ * call, reads no project files, and writes nothing.
+ *
+ * @param {import("./module-graph.js").ModuleGraph} graph
+ * @param {object} [ctx]
+ * @returns {Promise<{
+ *   html: string,
+ *   styles: string,
+ *   runtime: Array<{name:string, content:string}>,
+ *   hashMap: Record<string, string>
+ * }>}
+ */
+export async function render(graph, ctx = {}) {
+  if (!graph || !graph.root || !graph.modules) {
+    throw new Error("render(graph) requires a module graph built by buildModuleGraph");
+  }
+
+  const doc = createRenderDocument();
+  const cx = new ProcessContext(graph, doc);
+
+  for (const [id, module] of graph.modules) {
+    if (module.template) cx.cssScopesMap.set(id, module.cssId);
+  }
+
+  const rootFragment = renderInstance(graph.root, null, cx, [], null, null, ctx);
+
+  // Every template-bearing module gets a CSR class so hosts can mount
+  // imported components directly.
+  generateAllCSRClasses(graph, cx);
+
+  const moduleChunks = buildModuleChunks(graph, cx);
+  const baseSource = await readBaseRuntime();
+  const runtime = generateRuntime({
+    baseSource,
+    moduleChunks,
+    runtimeCalls: cx.runtimeCalls,
   });
-  const children = [...parent.children];
-  let chainActive = false;
-  let chainRendered = false;
 
-  const getLocation = (child) => {
-    if (!sourceContent) return sourceFile;
-    const lineNum = findElementLine(sourceContent, child.outerHTML);
-    return lineNum !== null ? `${sourceFile}:${lineNum}` : sourceFile;
-  };
+  const html = serializeFragment(rootFragment, doc);
+  const styles = cx.scopedStyles.join("\n");
 
-  const warnIfConstant = (expr, child, attr) => {
-    const { constant, value } = evaluateConstant(expr);
-    if (!constant) return;
-    warnConstantCondition(getLocation(child), child.tagName.toLowerCase(), attr, Boolean(value));
-  };
-
-  for (const child of children) {
-    const hasIf = child.hasAttribute("if");
-    const hasDelIf = hasMountIf(child);
-    const hasElif = child.hasAttribute("elif");
-    const hasElse = child.hasAttribute("else");
-
-    if (hasIf || hasDelIf || hasElif) {
-      const stripBraces = (raw) => raw.startsWith("{") ? raw.slice(1, -1) : raw;
-      if (hasIf) warnIfConstant(stripBraces(child.getAttribute("if")), child, "if");
-      if (hasDelIf) warnIfConstant(stripBraces(getMountIf(child)), child, "mount:if");
-      if (hasElif) warnIfConstant(stripBraces(child.getAttribute("elif")), child, "elif");
-    }
-
-    if (hasElif || hasElse) {
-      if (!chainActive) {
-        const tag = child.tagName.toLowerCase();
-        const attr = hasElif ? "elif" : "else";
-        throwError(`${getLocation(child)}\n    <${tag}> has ${attr} without a preceding if/mount:if sibling`);
-      }
-      if (chainRendered) { child.remove(); continue; }
-    }
-
-    if (hasIf) {
-      const raw = child.getAttribute("if");
-      const expr = raw.startsWith("{") ? raw.slice(1, -1) : raw;
-      const fn = compileExpr(expr, true);
-      const result = fn(ctxProxy);
-      chainActive = true;
-      if (result) {
-        chainRendered = true;
-      } else {
-        child.style.display = "none";
-        chainRendered = false;
-      }
-      child.removeAttribute("if");
-    } else if (hasDelIf) {
-      const raw = getMountIf(child);
-      const expr = raw.startsWith("{") ? raw.slice(1, -1) : raw;
-      const fn = compileExpr(expr, true);
-      const result = fn(ctxProxy);
-      chainActive = true;
-      if (result) {
-        chainRendered = true;
-      } else {
-        child.remove();
-        chainRendered = false;
-      }
-      removeMountIf(child);
-    } else if (hasElif) {
-      const raw = child.getAttribute("elif");
-      const expr = raw.startsWith("{") ? raw.slice(1, -1) : raw;
-      const fn = compileExpr(expr, true);
-      const result = fn(ctxProxy);
-      if (result) {
-        chainRendered = true;
-      } else {
-        child.remove();
-      }
-      child.removeAttribute("elif");
-    } else if (hasElse) {
-      chainRendered = true;
-      chainActive = false;
-      child.removeAttribute("else");
-    } else {
-      chainActive = false;
-      chainRendered = false;
-    }
-
-    if (child.parentNode) {
-      processPageConditionals(child, sourceFile, sourceContent, ctx);
-    }
-  }
-}
-
-async function processAssets(doc, graph, out) {
-  const { stylesheets, icons } = getAssetLinks(doc);
-  const scripts = getScriptElements(doc);
-
-  for (const link of stylesheets) {
-    await processStylesheet(link, graph.rootDir, graph.config.srcDir, out);
+  const hashMap = {};
+  for (const [id, cssId] of [...cx.cssScopesMap.entries()].sort(([a], [b]) =>
+    a.localeCompare(b)
+  )) {
+    hashMap[id] = cssId;
   }
 
-  for (const link of icons) {
-    await processIcons(link, graph.rootDir, graph.config.srcDir, out);
-  }
-
-  for (const script of scripts) {
-    await processScript(doc, script, graph.rootDir, graph.config.srcDir, out);
-  }
-}
-
-export async function renderPage(graph, ctx = {}) {
-  const out = {
-    files: [],
-    copies: [],
-    ids: [],
-    outDir: graph.paths.outDir,
-  };
-
-  const page = graph.page;
-  const dom = createDOM(page.source);
-  const doc = dom.document;
-  const appContainer = validateAppContainer(doc);
-
-  processPageConditionals(appContainer, page.sourcePath, dom.protectedContent, ctx);
-
-  const appElements = getAppElements(appContainer);
-  const { runtimeScript, scopesCss, hashMap, csrClasses } = processAllComponents(
-    appElements,
-    graph.loadedComponents,
-    page.sourcePath,
-    page.source,
-    ctx,
-    graph.config.treeShakeRuntime,
-    graph.originalComponentNames
-  );
-
-  const csrSource = await fs.readFile(new URL("../runtime/index.js", import.meta.url), "utf-8");
-  const runtimeFiles = generateRuntimeScript(runtimeScript, csrSource, csrClasses);
-
-  await processAssets(doc, graph, out);
-
-  if (scopesCss) {
-    const fileName = "sc-" + deterministicHash(scopesCss, 6) + ".css";
-    out.files.push({ path: fileName, content: scopesCss });
-    appendStylesheetLink(doc, fileName);
-  }
-
-  for (const file of runtimeFiles) {
-    out.files.push(file);
-    appendRuntimeScript(doc, file.path);
-  }
-
-  const html = await serializeDOM(dom);
-
-  await copyStaticDir(graph.paths.src, out);
-
-  return { html, hashMap, files: out.files, copies: out.copies };
+  return { html, styles, runtime, hashMap };
 }

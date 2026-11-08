@@ -7,35 +7,57 @@
 
 Chocola is a new and sweeter way to build your web apps.
 
-Just `.html` files with `<template>`, `<script>`, and `<style>` compiled to HTML with scoped CSS the browser already understands, and optional runtime when you need it.
+Components are single `.chjs` files with `<template>`, `<script>`, and `<style>` sections. Chocola compiles them into a plain HTML fragment with scoped CSS and optional ESM runtime chunks. No framework runtime is required in the browser.
 
-Import components. Instantiate them. Mount, update, remove. Client-side or server-side. Same file, minimal overhead.
+Components are used by importing them. The compiler discovers only the modules reachable from your root `.chjs` entry.
 
 ```html
+<!-- file: Greeting.chjs -->
 <script>
-    import CoolButton from './CoolButton.html';
-
-    export let title = "Hello";
-
-    let input;
-
-    function $runtime() {
-        input.focus();
-    }
+    export let name = "World";
 </script>
 
 <template>
-    <div>
-        <h1>{title}</h1>
-        <input bind:self="input" type="text" placeholder="Your name">
-        <CoolButton label="Not lame button"></CoolButton>
-    </div>
+    <h1>Hello {name}!</h1>
 </template>
 
 <style>
     h1 { color: chocolate; }
 </style>
 ```
+
+```html
+<!-- file: app.chjs -->
+<script>
+    import Greeting from "./Greeting.chjs";
+</script>
+
+<template>
+    <main>
+        <Greeting name="Ada" />
+    </main>
+</template>
+```
+
+## Using the compiler
+
+Chocola is the core library. A host such as [ChocolaKit](https://github.com/chocolajs/kit) owns the dev server, routing, document assembly, asset bundling, and output writing.
+
+```js
+import { buildModuleGraph, render } from "chocola/compiler";
+
+const graph = await buildModuleGraph(process.cwd(), { entry: "app.chjs" });
+const { html, styles, runtime, hashMap } = await render(graph, { name: "Ada" });
+```
+
+`render()` performs no project I/O. It returns:
+
+- `html` — the root component fragment;
+- `styles` — scoped CSS, ready for a host to serve or inline;
+- `runtime` — `{ name, content }` ESM chunks for client-side hydration and `ChocolaComponent` classes;
+- `hashMap` — root-relative module ids mapped to their CSS hashes.
+
+The host writes files, assembles the document, and serves those assets.
 
 ## Supporting Chocola
 

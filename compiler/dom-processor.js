@@ -1,61 +1,47 @@
 import { parseHTML } from "linkedom";
-import { promises as fs } from "fs";
-import path from "path";
-import { protectCurlyBraces, restoreCurlyBraces } from "../utils.js";
-import { throwError } from "./utils.js";
-import { readMyFile } from "./fs.js";
+import { restoreCurlyBraces } from "../utils.js";
 
-export function createDOM(srcIndexContent) {
-  const protectedContent = protectCurlyBraces(srcIndexContent);
-  const dom = parseHTML(protectedContent);
-  dom.protectedContent = protectedContent;
-  return dom;
+/**
+ * Create a detached render document. Rendering always starts from a fragment;
+ * the document only exists so `linkedom` can create nodes and fragments.
+ *
+ * @returns {Document}
+ */
+export function createRenderDocument() {
+  return parseHTML("<!doctype html><html><head></head><body></body></html>").document;
 }
 
-export function validateAppContainer(doc) {
-  const appContainer = doc.querySelector("app");
-  if (!appContainer) {
-    throwError("Index page must have an <app> element");
+/**
+ * Parse fragment HTML without wrapping it in a document body.
+ *
+ * @param {string} html
+ * @param {Document} doc
+ * @returns {DocumentFragment}
+ */
+export function parseFragment(html, doc) {
+  const fragment = doc.createDocumentFragment();
+  const temp = doc.createElement("div");
+  temp.innerHTML = html;
+
+  for (const child of [...temp.childNodes]) {
+    fragment.appendChild(child);
   }
-  return appContainer;
+
+  return fragment;
 }
 
-export function getAppElements(appContainer) {
-  return Array.from(appContainer.querySelectorAll("*"));
-}
-
-export async function serializeDOM(dom) {
-  return restoreCurlyBraces(dom.document.toString());
-}
-
-export async function writeHTMLOutput(html, outDirPath) {
-  await fs.writeFile(path.join(outDirPath, "index.html"), html);
-}
-
-export function getAssetLinks(doc) {
-  const docLinks = Array.from(doc.querySelectorAll("link"));
-  const stylesheets = docLinks.filter(link => link.rel === "stylesheet");
-  const icons = docLinks.filter(link => link.rel === "icon");
-  return { stylesheets, icons };
-}
-
-export async function writeCSSOutput(css, outDirPath, filename = "scopes.css") {
-  await fs.writeFile(path.join(outDirPath, filename), css);
-}
-
-export function appendStylesheetLink(doc, filename) {
-  const linkEl = doc.createElement("link");
-  linkEl.rel = "stylesheet";
-  linkEl.href = "./" + filename;
-  doc.head.appendChild(linkEl);
-}
-
-export function getScriptElements(doc) {
-  return Array.from(doc.querySelectorAll("script[src]"));
-}
-
-export function appendRuntimeScript(doc, filename) {
-  const runtimeScriptEl = doc.createElement("script");
-  runtimeScriptEl.src = "./" + filename;
-  doc.body.appendChild(runtimeScriptEl);
+/**
+ * Serialize a fragment (not a whole document) and restore protected characters.
+ *
+ * `linkedom` serializes document fragments with a `<#document-fragment>` wrapper,
+ * so a temporary element is used to obtain the inner HTML.
+ *
+ * @param {DocumentFragment} fragment
+ * @param {Document} doc
+ * @returns {string}
+ */
+export function serializeFragment(fragment, doc) {
+  const holder = doc.createElement("div");
+  holder.appendChild(fragment.cloneNode(true));
+  return restoreCurlyBraces(holder.innerHTML);
 }

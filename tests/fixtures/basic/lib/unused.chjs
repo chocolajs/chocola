@@ -1,0 +1,11 @@
+<script>
+  export let hidden = "not imported";
+</script>
+<template>
+  <div class="unused">{hidden}</div>
+</template>
+<style>
+  .unused {
+    color: gray;
+  }
+</style>

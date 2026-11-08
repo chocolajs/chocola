@@ -7,34 +7,31 @@ description: Frequently asked questions about Chocola
 
 ### What exactly is Chocola?
 
-Chocola is a small web framework that lets you build apps out of reusable components — little self-contained pieces of HTML, CSS, and JavaScript that you snap together. When you're ready to ship, Chocola compiles everything into plain vanilla JavaScript. No framework baggage, no runtime to download, just clean code in the browser.
+Chocola is a small library for building apps out of reusable single-file components — little self-contained pieces of HTML, CSS, and JavaScript that you snap together. Components are `.chjs` files.
+
+When you build, Chocola compiles them into a plain HTML fragment with scoped CSS and optional ESM runtime. No framework runtime ships to the browser.
 
 ### How do I get a project up and running?
 
-Install Chocola with `npm install chocola`, then create `chocola.config.json` (optional — defaults are used if absent) and `src/index.html`. Build with the library API:
+The recommended way is ChocolaKit (`@chocolajs/kit`), which supplies the dev server, CLI, routing, and document assembly. For a custom host, use the core API:
 
 ```js
-import { app } from "chocola/compiler";
+import { buildModuleGraph, render } from "chocola/compiler";
 
-await app.build("./my-app");
+const graph = await buildModuleGraph(process.cwd(), { entry: "app.chjs" });
+const { html, styles, runtime, hashMap } = await render(graph, { name: "Ada" });
 ```
 
-Your HTML entry point lives at `src/index.html`.
-
-For a dev server with live reload, a production build CLI, or SSR serving, use ChocolaKit (`@chocolajs/kit`), which wraps this library. For custom hosts, compose the pipeline directly: `buildModuleGraph(rootDir)` + `renderPage(graph, ctx)` + `emit(graph)` from `chocola/compiler`.
-
-### Why does my HTML need an `<app>` tag?
-
-The `<app>` element is the landing zone where Chocola drops all your compiled components. Think of it as the stage — Chocola won't know where to put anything without it. Everything outside `<app>` (like your `<head>` or a nav bar) is left completely alone. Elements outside `<app>` can be a persistent static layout if you want.
+`rootDir` must be absolute and `entry` must point to a `.chjs` file. There is no `src/index.html` and no implicit `index.chjs` lookup.
 
 ## Components
 
 ### What does a component look like?
 
-A component is a single `.html` file with up to three sections: `<template>` (required), `<script>` (optional), and `<style>` (optional).
+A component is a single `.chjs` file with up to three sections, all optional: `<template>`, `<script>`, and `<style>`.
 
 ```html
-<!-- file: Card.html -->
+<!-- file: Card.chjs -->
 <script>
     export let title = "Card";
 </script>
@@ -49,13 +46,27 @@ A component is a single `.html` file with up to three sections: `<template>` (re
 </style>
 ```
 
-### How do I use a component on a page?
+A file with only `<script>` is valid and renders nothing.
 
-Use the component's filename (without `.html`) as an HTML tag, written in PascalCase. A file called `UserCard.html` becomes `<UserCard></UserCard>` in your HTML. Chocola replaces that tag with the component's rendered output at compile time. Component names should be PascalCase (first letter capitalized).
+### How do I use a component?
+
+Import it in the `<script>` of the file that renders it, then use the local name as the tag:
+
+```html
+<script>
+    import UserCard from "./UserCard.chjs";
+</script>
+
+<template>
+    <UserCard title="Profile" />
+</template>
+```
+
+Tags are resolved through imports. An unimported non-static tag is a compile error with the module id, line, and a suggestion when a close name exists.
 
 ### Can a component render content passed into it?
 
-Yes — put a `<slot>` element in your component's HTML template. Whatever you write between the component's opening and closing tags in the parent gets rendered in that spot.
+Yes — put a `<slot>` element in your component's template. Whatever you write between the component's opening and closing tags in the parent gets rendered in that spot.
 
 ```html
 <!-- component template -->
@@ -68,6 +79,23 @@ Yes — put a `<slot>` element in your component's HTML template. Whatever you w
   <p>Hello from the parent</p>
 </Card>
 ```
+
+### Can I import a whole directory of components?
+
+Yes:
+
+```html
+<script>
+    import * as Lib from "./lib/";
+</script>
+
+<template>
+    <Lib:Card />
+    <Lib:Sub:Thing />
+</template>
+```
+
+Namespace components resolve relative to the directory import.
 
 ## Props & Data
 
@@ -83,7 +111,7 @@ Inside the component's `<script>` and `$runtime`, those values are in scope by n
 
 ### How do state and reactivity work?
 
-Reactivity and state will be added in Chocola 3. As of now, manually update contents via components' `$runtime()` function and global scripts.
+Reactivity and state will be added in the future. As of now, manually update contents via a component's `$runtime` function and global scripts.
 
 ## Templates & Logic
 
@@ -110,11 +138,13 @@ Yes:
 
 ### Will component CSS bleed into the rest of the page?
 
-No. CSS you import into a component is automatically scoped. Chocola adds a unique hash to the component's elements under the hood. A `button { color: red }` rule in one component won't affect buttons anywhere else.
+No. CSS inside `<style>` is automatically scoped. Chocola adds a per-module scope attribute to the component's elements under the hood.
+
+A `button { color: red }` rule in one component won't affect buttons anywhere else.
 
 ### What if I want styles that apply to the whole site?
 
-Link a stylesheet the normal way in your `src/index.html` `<head>`. Those styles apply globally. When a component has a scoped rule that conflicts with a global one, the scoped style prevails inside that component.
+Global styles are the host's responsibility. Include them in the document shell your host assembles. Chocola core returns only the scoped component CSS in `styles`.
 
 ## Runtime
 
@@ -124,4 +154,8 @@ Once, right after the component has been rendered into the DOM. It's the right p
 
 ### What is `self`?
 
-- `self` is the root DOM node of your component instance. Always use `self.querySelector()` instead of `document.querySelector()` to avoid bugs when multiple instances of the same component exist.
+`self` is the root DOM node of your component instance, injected into `$runtime`. Always use `self.querySelector()` instead of `document.querySelector()` to avoid bugs when multiple instances of the same component exist.
+
+### How does client-side code load?
+
+`render()` returns `runtime` descriptors instead of a single bundled script. Each component module is its own ESM chunk. The host serves those chunks, and the returned chunks import `ChocolaComponent` and child classes by filename. Load them as modules or let your bundler resolve them.

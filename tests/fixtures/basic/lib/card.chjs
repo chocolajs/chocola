@@ -1,6 +1,6 @@
 <script>
+  import Action from "./action.chjs";
   export let title = "Card";
-  import Action from "./Action.html";
 </script>
 <template>
   <div class="card">

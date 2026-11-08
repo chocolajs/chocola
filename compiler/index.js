@@ -1,61 +1,25 @@
-import { promises as fs } from "fs";
-import path from "path";
-import { performance } from "perf_hooks";
+/**
+ * Chocola compiler entry points.
+ *
+ * Core builds an import-based module graph from a `.chjs` entry and renders it
+ * to an in-memory fragment plus runtime descriptors. It never reads project
+ * config, writes output, or assembles a document.
+ */
+export { buildModuleGraph, ChocolaModule, ModuleGraph } from "./module-graph.js";
+export { render } from "./render.js";
+export { normalizeConfig } from "./config.js";
+
 import { buildModuleGraph } from "./module-graph.js";
-import { renderPage } from "./render.js";
-import { writeHTMLOutput } from "./dom-processor.js";
+import { render } from "./render.js";
 
-export { buildModuleGraph } from "./module-graph.js";
-export { renderPage } from "./render.js";
-export { ChocolaModule, ModuleGraph } from "./module-graph.js";
-
-async function setupOutputDirectory(outDirPath, emptyOutDir) {
-  if (emptyOutDir) {
-    await fs.rm(outDirPath, { recursive: true, force: true });
-    await fs.mkdir(outDirPath);
-  }
+/**
+ * Build a graph and render it in one call.
+ *
+ * @param {string} rootDir absolute project root
+ * @param {{entry?: string, config?: object, ctx?: object}} [options]
+ * @returns {Promise<{html:string, styles:string, runtime:Array<{name:string, content:string}>, hashMap:Record<string,string>}>}
+ */
+export async function compile(rootDir, options = {}) {
+  const graph = await buildModuleGraph(rootDir, options);
+  return render(graph, options.ctx);
 }
-
-export async function emit(graph, options = {}) {
-  const outDir = graph.paths.outDir;
-  await setupOutputDirectory(outDir, graph.config.emptyOutDir);
-
-  const result = await renderPage(graph, options.ctx);
-
-  for (const file of result.files) {
-    await fs.writeFile(path.join(outDir, file.path), file.content);
-  }
-
-  for (const copy of result.copies) {
-    if (copy.recursive) {
-      await fs.cp(copy.from, copy.to, { recursive: true, force: true });
-    } else {
-      await fs.copyFile(copy.from, copy.to);
-    }
-  }
-
-  await writeHTMLOutput(result.html, outDir);
-
-  const chocolaDir = path.join(graph.rootDir, ".chocola");
-  await fs.mkdir(chocolaDir, { recursive: true });
-  await fs.writeFile(path.join(chocolaDir, "hashes.json"), JSON.stringify(result.hashMap, null, 2) + "\n");
-
-  return result;
-}
-
-export default async function compile(rootDir, buildConfig = {}) {
-  const isHotReload = buildConfig?.isHotReload || null;
-  const overrides = buildConfig?.overrides || null;
-  const silent = buildConfig?.silent || false;
-  const startTime = performance.now();
-
-  const graph = await buildModuleGraph(rootDir, { overrides });
-
-  await emit(graph);
-
-  const durationMs = performance.now() - startTime;
-}
-
-export const app = {
-  async build(__rootdir) { return compile(__rootdir) }
-};

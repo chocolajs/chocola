@@ -6,7 +6,7 @@ import { createInterface } from "readline";
 import { stdin, stdout } from "process";
 import { fileURLToPath } from "url";
 import { runtimeFunctionId } from "../compiler/utils.js";
-import { makeSyntheticApp } from "./fixtures.js";
+import { makeTempApp } from "./fixtures.js";
 import pkg from "../package.json" with { type: "json" };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -43,8 +43,7 @@ function runScenario(kind, params, runs) {
 }
 
 async function scenario(kind, params, runs) {
-  const { stats } = await runScenario(kind, params, runs);
-  return stats;
+  return runScenario(kind, params, runs);
 }
 
 function fmt(ms) {
@@ -98,14 +97,6 @@ function timeRow(step, s, note = "") {
       r1MB(s.rssPeak),
       r1MB(s.heapPeak),
     ],
-  };
-}
-
-function derivedRow(step, medianMs) {
-  const r3 = (x) => Math.round(x * 1000) / 1000;
-  return {
-    cells: [step, fmt(medianMs), "-", "-", "-", "-", "-", "-"],
-    raw: [step, r3(medianMs), null, null, null, null, null, null],
   };
 }
 
@@ -167,48 +158,23 @@ function askYesNo(question, def) {
 }
 
 async function benchReference() {
-  console.log(`\n== reference: tests/fixtures/basic  (n=${RUNS.reference}) ==`);
-
   const basic = { app: "basic" };
   const build = await scenario("build", basic, RUNS.reference);
   const render = await scenario("render", basic, RUNS.reference);
-  const emitM = await scenario("emit", basic, RUNS.reference);
-  const writeOverhead = Math.max(0, emitM.median - render.median);
+  const compile = await scenario("compile", basic, RUNS.reference);
 
-  const rows = [
-    timeRow("buildModuleGraph", build),
-    timeRow("renderPage", render),
-    timeRow("emit", emitM, "(render + writes)"),
-    derivedRow("write overhead (emit - render)", writeOverhead),
-  ];
-  showTable("reference", TIME_HEAD, rows, csvTimeHeader(), rows.map((r) => r.raw));
-}
-
-async function coldBreakdown(name, label, params) {
-  const total = await scenario("build", params, RUNS.reference);
-  const configM = await scenario("config", params, RUNS.reference);
-  const { stats: discoverM, context } = await runScenario("discover", params, RUNS.reference);
-  const pageScanM = await scenario("pageScan", params, RUNS.reference);
-  const compRemainder = Math.max(0, total.median - configM.median - discoverM.median - pageScanM.median);
-
+  const context = build.context || {};
   console.log(
-    `\nfixture: ${label}  |  components: ${context.components}  |  page source: ${fmtBytes(context.pageBytes)}  (n=${RUNS.reference})`
+    `\n== reference: tests/fixtures/basic  (modules=${context.modules ?? "?"}, ` +
+      `root template=${fmtBytes(context.rootTemplateBytes || 0)}, n=${RUNS.reference}) ==`
   );
 
   const rows = [
-    timeRow("config (load + resolvePaths)", configM),
-    timeRow("discover (src index + components)", discoverM),
-    timeRow("page scan (parse + walk + assets)", pageScanM),
-    derivedRow("component compile (remainder)", compRemainder),
-    timeRow("total buildModuleGraph", total),
+    timeRow("buildModuleGraph", build.stats),
+    timeRow("render", render.stats),
+    timeRow("compile", compile.stats, "(build + render)"),
   ];
-  showTable(name, TIME_HEAD, rows, csvTimeHeader(), rows.map((r) => r.raw));
-}
-
-async function benchColdBuild() {
-  console.log("\n== cold build breakdown ==");
-  await coldBreakdown("cold-build-basic", "tests/fixtures/basic", { app: "basic" });
-  await coldBreakdown("cold-build-components-200", "synthetic components=200", { app: "synthetic", components: 200 });
+  showTable("reference", TIME_HEAD, rows, csvTimeHeader(), rows.map((r) => r.raw));
 }
 
 async function benchScaling() {
@@ -220,24 +186,24 @@ async function benchScaling() {
     const params = { app: "synthetic", components };
     const build = await scenario("build", params, RUNS.synthetic);
     const render = await scenario("render", params, RUNS.synthetic);
-    rows.push(timeRow(`components=${components} build`, build));
-    rows.push(timeRow(`components=${components} render`, render));
+    rows.push(timeRow(`components=${components} build`, build.stats));
+    rows.push(timeRow(`components=${components} render`, render.stats));
   }
 
   for (const depth of [1, 5, 10]) {
     const params = { app: "synthetic", depth };
     const build = await scenario("build", params, RUNS.synthetic);
     const render = await scenario("render", params, RUNS.synthetic);
-    rows.push(timeRow(`nested depth=${depth} build`, build));
-    rows.push(timeRow(`nested depth=${depth} render`, render));
+    rows.push(timeRow(`nested depth=${depth} build`, build.stats));
+    rows.push(timeRow(`nested depth=${depth} render`, render.stats));
   }
 
-  for (const pageSizeKb of [64, 256]) {
-    const params = { app: "synthetic", pageSizeKb };
+  for (const rootTemplateKb of [64, 256]) {
+    const params = { app: "synthetic", rootTemplateKb };
     const build = await scenario("build", params, RUNS.synthetic);
     const render = await scenario("render", params, RUNS.synthetic);
-    rows.push(timeRow(`page source=${pageSizeKb}kb build`, build));
-    rows.push(timeRow(`page source=${pageSizeKb}kb render`, render));
+    rows.push(timeRow(`root template=${rootTemplateKb}kb build`, build.stats));
+    rows.push(timeRow(`root template=${rootTemplateKb}kb render`, render.stats));
   }
 
   showTable("scaling", TIME_HEAD, rows, csvTimeHeader(), rows.map((r) => r.raw));
@@ -246,21 +212,19 @@ async function benchScaling() {
 async function benchStableIds() {
   console.log("\n== stable-id overhead (in-process) ==");
 
-  const names = Array.from({ length: 200 }, (_, i) => `c${i}.html`);
+  const names = Array.from({ length: 200 }, (_, i) => `lib/c${i}.chjs`);
   const t0 = performance.now();
   for (const name of names) {
     runtimeFunctionId(name);
   }
   const total = (performance.now() - t0) * 1000;
 
-  const { root, cleanup } = await makeSyntheticApp({ components: 200 });
-  let buildMs = 0;
-  try {
-    const stats = await scenario("build", { app: "synthetic", components: 200 }, RUNS.synthetic);
-    buildMs = stats.median;
-  } finally {
-    await cleanup();
-  }
+  const build = await scenario(
+    "build",
+    { app: "synthetic", components: 200 },
+    RUNS.synthetic
+  );
+  const buildMs = build.stats.median;
 
   const micro = total / names.length;
   const pct = buildMs > 0 ? ((total / 1000 / buildMs) * 100).toFixed(2) + "%" : "-";
@@ -275,13 +239,13 @@ async function benchStableIds() {
 
 async function benchRuntimeSize() {
   console.log("\n== runtime size (tree-shaking) ==");
-  // Synthetic 100 components, each with 2 unused helpers to measure payload reduction
-  const { buildModuleGraph, renderPage } = await import("../compiler/index.js");
-  const { makeTempApp } = await import("./fixtures.js");
+  const { buildModuleGraph, render } = await import("../compiler/index.js");
   const { root, cleanup } = await makeTempApp(async (root) => {
-    const libDir = path.join(root, "src", "lib");
+    const libDir = path.join(root, "lib");
     await fs.mkdir(libDir, { recursive: true });
-    await fs.writeFile(path.join(root, "chocola.config.json"), JSON.stringify({ bundle: { srcDir: "src", outDir: "dist" } }, null, 2));
+
+    const imports = [];
+    const usages = [];
     for (let i = 0; i < 100; i++) {
       const src = `<script>
   let a${i} = 1;
@@ -292,26 +256,31 @@ async function benchRuntimeSize() {
 </script>
 <template><div>{b${i}}</div></template>
 `;
-      await fs.writeFile(path.join(libDir, `c${i}.html`), src);
+      await fs.writeFile(path.join(libDir, `c${i}.chjs`), src);
+      imports.push(`  import C${i} from "./lib/c${i}.chjs";`);
+      usages.push(`    <C${i} />`);
     }
-    const body = Array.from({length: 100}, (_,i)=> `<c${i}></c${i}>`).join("\n    ");
-    const index = `<!DOCTYPE html><html><head><meta charset="UTF-8"/></head><body><app>${body}</app></body></html>`;
-    await fs.writeFile(path.join(root, "src", "index.html"), index);
+
+    const app =
+      `<script>\n${imports.join("\n")}\n</script>\n` +
+      `<template>\n  <main>\n${usages.join("\n")}\n  </main>\n</template>\n`;
+    await fs.writeFile(path.join(root, "app.chjs"), app);
   });
+
   try {
-    const graph = await buildModuleGraph(root);
-    const result = await renderPage(graph);
-    const runtimeFiles = result.files.filter(f => f.path.startsWith("run-"));
+    const graph = await buildModuleGraph(root, { entry: "app.chjs" });
+    const result = await render(graph);
+    const runtimeFiles = result.runtime;
     const len = runtimeFiles.reduce((sum, f) => sum + f.content.length, 0);
-    const hasA = runtimeFiles.some(f => f.content.includes("let a0"));
-    const hasH1 = runtimeFiles.some(f => f.content.includes("h1_0"));
-    console.log(`runtimeScript.length: ${len} bytes (${(len/1024).toFixed(1)} KB)`);
+    const hasA = runtimeFiles.some((f) => f.content.includes("let a0"));
+    const hasH1 = runtimeFiles.some((f) => f.content.includes("h1_0"));
+    console.log(`runtime.length: ${len} bytes (${(len / 1024).toFixed(1)} KB)`);
     console.log(`contains unused a0/h1_0: ${hasA}/${hasH1} (should be false/false)`);
     const rows = [
       ["components", "100"],
-      ["runtimeScript (bytes)", String(len)],
-      ["runtimeScript (KB)", (len/1024).toFixed(1)],
-      ["unused helpers dropped", (!hasA && !hasH1) ? "yes" : "no"],
+      ["runtime (bytes)", String(len)],
+      ["runtime (KB)", (len / 1024).toFixed(1)],
+      ["unused helpers dropped", !hasA && !hasH1 ? "yes" : "no"],
     ];
     showTable("runtime-size", ["metric", "value"], rows, ["metric", "value"], rows);
   } finally {
@@ -334,7 +303,6 @@ async function main() {
   );
 
   await benchReference();
-  await benchColdBuild();
   await benchScaling();
   await benchStableIds();
   await benchRuntimeSize();

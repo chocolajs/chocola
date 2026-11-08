@@ -1,37 +1,43 @@
 ---
 title: Per-request rendering
-description: Render pages per request with the pure renderPage pipeline
+description: Render components per request with the pure core API
 ---
 
-`renderPage(graph, ctx)` is a pure function (no disk writes) that hosts call
-per request to render pages with request-time data. This is how ChocolaKit's
-SSR server — and any custom host — serves dynamic pages on top of this library.
+`render(graph, ctx)` is a pure function (no project I/O, no writes) that hosts call per request to render with request-time data. This is how ChocolaKit's dev server and SSR server — and any custom host — serve dynamic pages on top of this library.
 
 ## Summary
 
-1. [Build the graph once at startup](#1-graph) and keep it in memory without writing to disk.
-2. [Map URLs to the page module](#2-route-table) so requests can be dispatched quickly.
-3. [Render each request with renderPage](#3-per-request-render) using a context built from the request.
-4. [Serve virtual files from memory](#4-virtual-files) with your own caching and compression.
+1. [Build a graph once at startup](#1-graph) for each root entry and keep it in memory.
+2. [Map URLs to entries](#2-routing) in the host.
+3. [Render each request with render](#3-per-request-render) using a context built from the request.
+4. [Assemble and serve the result](#4-serving) with your own document shell, caching, and compression.
 
 ## Usage
 
 ```js
-import { buildModuleGraph, renderPage } from "chocola/compiler";
+import { buildModuleGraph, render } from "chocola/compiler";
 import http from "http";
 
-const graph = await buildModuleGraph(rootDir);
+const rootDir = process.cwd();
+const graph = await buildModuleGraph(rootDir, { entry: "app.chjs" });
 
 const handler = async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   const ctx = Object.fromEntries(url.searchParams); // per-request props
-  const { html } = await renderPage(graph, ctx);
+  const { html, styles, runtime } = await render(graph, ctx);
+
   res.writeHead(200, { "Content-Type": "text/html" });
-  res.end(html);
+  res.end(`<!doctype html>
+<html>
+  <head><style>${styles}</style></head>
+  <body>${html}</body>
+</html>`);
 };
 
 http.createServer(handler).listen(8080);
 ```
+
+`runtime` is a list of `{ name, content }` ESM chunks. A real host serves those chunks at stable URLs instead of embedding them.
 
 > The dev server, production SSR server, and CLI are ChocolaKit
 > (`@chocolajs/kit`), which wraps this pipeline. The pattern below is what any
@@ -41,35 +47,56 @@ http.createServer(handler).listen(8080);
 
 ### 1. Graph
 
-Build the module graph once at startup with `buildModuleGraph` in
-`compiler/module-graph.js`, called with the project root directory. It performs
-discovery and parsing as described in the compiler flow, but writes no files.
-The result is reused for every render.
+Build a module graph once at startup with `buildModuleGraph` in
+`compiler/module-graph.js`, called with an absolute project root and a required
+`.chjs` entry. It reads the reachable `.chjs` modules and parses them, but
+writes no files. The result can be reused for every render.
 
-### 2. Route table
+If your app has multiple roots, build one graph per root entry and keep the
+graphs in a map.
 
-Build a small lookup mapping incoming URLs to the page module. The graph's
-`page` module (`index.html`) serves `/`, `/index.html`, and `/index`. Hold the
-table in memory alongside the graph.
+### 2. Routing
+
+Chocola core has no routing and no page module. The host maps incoming URLs to a
+root entry and its graph:
+
+```js
+const graphs = new Map([
+  ["/", await buildModuleGraph(rootDir, { entry: "pages/home.chjs" })],
+  ["/about", await buildModuleGraph(rootDir, { entry: "pages/about.chjs" })],
+]);
+```
 
 ### 3. Per-request render
 
-Turn a single request into HTML with `renderPage` in `compiler/render.js`,
-passing the shared graph and a context object named `ctx`.
+Turn a request into a result with `render` in `compiler/render.js`, passing the
+shared graph and a context object named `ctx`.
 
-Build `ctx` from request data — e.g. query parameters merged with middleware
-results and any extra host context. Page and component conditionals such as
-`if` and `mount:if`, and prop interpolations of the form `{prop}`, are
-evaluated against this merged context, so the same page can vary per visitor.
+Build `ctx` from request data — query parameters, middleware results, session
+values, and any extra host context. Component conditionals such as `if` and
+`mount:if`, and prop interpolations of the form `{prop}`, are evaluated against
+this context, so the same graph can render differently per visitor.
 
-### 4. Virtual files
+Each call creates fresh render state, so concurrent requests do not share
+mutable data.
 
-Serve supporting files without writing them to disk. `renderPage` returns two
-collections named `files` and `copies`: `files` holds generated assets such as
-scoped CSS and runtime scripts (hashed names `sc-*`, `run-*`, `css-*`, `js-*`);
-`copies` holds entries that would otherwise be copied from `src` and `static`.
+### 4. Serving
 
-Keep these assets in memory and serve them with your own `ETag` /
+`render` returns exactly:
+
+- `html` — the root component fragment;
+- `styles` — scoped component CSS;
+- `runtime` — `{ name, content }` ESM chunks;
+- `hashMap` — module ids mapped to CSS ids.
+
+The host owns:
+
+- the document shell (`<html>`, `<head>`, `<body>`, global styles, metadata);
+- writing or serving `styles` (inline or as a CSS file);
+- serving runtime chunks under the names returned in `runtime`;
+- routing, static assets, bundling of non-`.chjs` imports, and hash persistence.
+
+Keep runtime chunks in memory or on disk and serve them with your own `ETag` /
 `Last-Modified` / `Cache-Control` handling, `304` responses for
 `If-None-Match` / `If-Modified-Since`, and `gzip` compression for compressible
 types.

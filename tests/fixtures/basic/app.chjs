@@ -1,0 +1,21 @@
+<script>
+  import Greeting from "./lib/greeting.chjs";
+  import Counter from "./lib/counter.chjs";
+  import Card from "./lib/card.chjs";
+  export let title = "Fixture";
+</script>
+<template>
+  <section class="app">
+    <h1>{title}</h1>
+    <Greeting name="World" />
+    <Counter start="5" />
+    <Card>
+      <span>slot content</span>
+    </Card>
+  </section>
+</template>
+<style>
+  .app {
+    display: block;
+  }
+</style>

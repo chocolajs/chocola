@@ -1,0 +1,15 @@
+<script>
+  function $runtime() {
+    self.classList.add("ready");
+  }
+</script>
+<template>
+  <button class="action">
+    <slot></slot>
+  </button>
+</template>
+<style>
+  .action {
+    color: red;
+  }
+</style>
